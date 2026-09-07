@@ -1,7 +1,10 @@
-import { useQueue } from "@/context/QueueContext";
+import { supabase } from "@/lib/supabase";
+import { Ionicons } from "@expo/vector-icons";
+import type { User } from "@supabase/supabase-js";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+    ActivityIndicator,
     Pressable,
     SafeAreaView,
     StyleSheet,
@@ -12,25 +15,93 @@ import {
 
 export default function AdminLoginScreen() {
   const router = useRouter();
-  const { saUsers } = useQueue();
 
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const onLogin = () => {
-    const user = saUsers.find(
-      (u) => u.email.toLowerCase() === email.trim().toLowerCase(),
-    );
+  const isManager = (user: User) => {
+    const role = user.app_metadata?.role || user.user_metadata?.role;
+    return role === "manager" || role === "admin";
+  };
 
-    if (!user || user.role !== "admin") {
-      setMessage("Unknown admin email. Use an admin account.");
+  const onLogin = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password) {
+      setMessage("Please enter manager email and password.");
       return;
     }
 
-    router.push({
-      pathname: "/admin/dashboard",
-      params: { adminName: user.name },
+    setLoading(true);
+    setMessage(null);
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
     });
+
+    console.log("ACCESS TOKEN:", data.session?.access_token);
+
+    if (error || !data.user) {
+      setMessage(error?.message || "Login failed. Please check credentials.");
+      setLoading(false);
+      return;
+    }
+
+    if (!isManager(data.user)) {
+      await supabase.auth.signOut();
+      setMessage(
+        "Account is authenticated but not assigned manager role. Set role=manager in Supabase user metadata.",
+      );
+      setLoading(false);
+      return;
+    }
+
+    setPassword("");
+    setLoading(false);
+    router.replace({
+      pathname: "/admin/dashboard",
+      params: { adminEmail: data.user.email ?? normalizedEmail },
+    });
+  };
+
+  const onCreateManagerAccount = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password) {
+      setMessage("Enter email and password before creating manager account.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage(null);
+
+    const { data, error } = await supabase.auth.signUp({
+      email: normalizedEmail,
+      password,
+      options: {
+        data: {
+          role: "manager",
+        },
+      },
+    });
+
+    if (error) {
+      setMessage(error.message);
+      setLoading(false);
+      return;
+    }
+
+    const needsEmailConfirmation = !data.session;
+    setLoading(false);
+    setMessage(
+      needsEmailConfirmation
+        ? "Manager account created. Confirm email in inbox, then login."
+        : "Manager account created in Supabase. You can login now.",
+    );
   };
 
   return (
@@ -51,8 +122,42 @@ export default function AdminLoginScreen() {
           keyboardType="email-address"
         />
 
-        <Pressable style={styles.button} onPress={onLogin}>
-          <Text style={styles.buttonText}>Login as Manager</Text>
+        <View style={styles.inputRow}>
+          <TextInput
+            style={styles.inputFlex}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Password"
+            placeholderTextColor="#7E8EA8"
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+          />
+          <Pressable
+            onPress={() => setShowPassword((s) => !s)}
+            style={styles.eyeButton}
+          >
+            <Ionicons
+              name={showPassword ? "eye" : "eye-off"}
+              size={20}
+              color="#9FB0CD"
+            />
+          </Pressable>
+        </View>
+
+        <Pressable style={styles.button} onPress={onLogin} disabled={loading}>
+          {loading ? (
+            <ActivityIndicator color="#FFF6F2" />
+          ) : (
+            <Text style={styles.buttonText}>Login as Manager</Text>
+          )}
+        </Pressable>
+
+        <Pressable
+          style={styles.secondaryButton}
+          onPress={onCreateManagerAccount}
+          disabled={loading}
+        >
+          <Text style={styles.secondaryButtonText}>Create Manager Account</Text>
         </Pressable>
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
@@ -83,6 +188,25 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.08)",
     color: "#F4F8FF",
   },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  inputFlex: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    color: "#F4F8FF",
+  },
+  eyeButton: {
+    padding: 8,
+    marginLeft: 6,
+  },
   button: {
     backgroundColor: "rgba(255,255,255,0.16)",
     paddingVertical: 10,
@@ -91,5 +215,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   buttonText: { color: "#FFF6F2", fontWeight: "700" },
+  secondaryButton: {
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  secondaryButtonText: { color: "#DDE8FF", fontWeight: "700" },
   message: { color: "#FFD0A8", marginTop: 8 },
 });

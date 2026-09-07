@@ -1,6 +1,8 @@
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+    ActivityIndicator,
     Pressable,
     SafeAreaView,
     StyleSheet,
@@ -9,33 +11,85 @@ import {
     View,
 } from "react-native";
 
-import { useQueue } from "@/context/QueueContext";
+import { supabase } from "@/lib/supabase";
 
 export default function SALoginScreen() {
   const router = useRouter();
-  const { saUsers } = useQueue();
 
   const [email, setEmail] = useState("");
-  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const onLogin = () => {
-    const user = saUsers.find(
-      (item) => item.email.toLowerCase() === email.trim().toLowerCase(),
-    );
+  const onLogin = async () => {
+    const rawId = email.trim().toLowerCase();
 
-    if (!user) {
-      setMessage(
-        "Unknown SA email. Try aina.sa@showroom.local or farid.sa@showroom.local.",
-      );
+    if (!rawId || !password) {
+      setMessage("Please enter SA ID and password.");
       return;
     }
 
-    const saName = name.trim() || user.name;
+    // Must match the same ID-to-email mapping used when the manager created the account.
+    const normalizedEmail = rawId.includes("@")
+      ? rawId
+      : `${rawId}@sa.internal`;
 
-    router.push({
+    setLoading(true);
+    setMessage(null);
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password,
+    });
+
+    if (error || !data.user) {
+      setMessage(error?.message || "Login failed. Please check credentials.");
+      setLoading(false);
+      return;
+    }
+
+    const { data: saAccount, error: saLookupError } = await supabase
+      .from("sa_users")
+      .select("name, role")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+
+    if (saLookupError) {
+      await supabase.auth.signOut();
+      setMessage(saLookupError.message);
+      setLoading(false);
+      return;
+    }
+
+    if (!saAccount) {
+      await supabase.auth.signOut();
+      setMessage(
+        "This SA account is not active. Ask manager to create or re-enable your account.",
+      );
+      setLoading(false);
+      return;
+    }
+
+    const userRole =
+      saAccount.role ||
+      data.user.app_metadata?.role ||
+      data.user.user_metadata?.role;
+
+    if (userRole !== "sa" && userRole !== "admin") {
+      await supabase.auth.signOut();
+      setMessage("Account role is not allowed for SA dashboard.");
+      setLoading(false);
+      return;
+    }
+
+    const saName = saAccount.name || "SA";
+    setPassword("");
+    setLoading(false);
+
+    router.replace({
       pathname: "/sa/dashboard",
-      params: { saName, role: user.role },
+      params: { saName, role: userRole },
     });
   };
 
@@ -46,28 +100,45 @@ export default function SALoginScreen() {
       <View style={styles.card}>
         <Text style={styles.title}>Service Advisor Login</Text>
         <Text style={styles.subtitle}>
-          Use a registered SA email to access dashboard controls.
+          Use manager-created SA credentials to access dashboard controls.
         </Text>
 
         <TextInput
           style={styles.input}
           value={email}
           onChangeText={setEmail}
-          placeholder="SA Email"
+          placeholder="SA ID"
           placeholderTextColor="#7E8EA8"
           autoCapitalize="none"
-          keyboardType="email-address"
         />
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="Display Name (optional)"
-          placeholderTextColor="#7E8EA8"
-        />
+        <View style={styles.inputRow}>
+          <TextInput
+            style={styles.inputFlex}
+            value={password}
+            onChangeText={setPassword}
+            placeholder="Password"
+            placeholderTextColor="#7E8EA8"
+            secureTextEntry={!showPassword}
+            autoCapitalize="none"
+          />
+          <Pressable
+            onPress={() => setShowPassword((s) => !s)}
+            style={styles.eyeButton}
+          >
+            <Ionicons
+              name={showPassword ? "eye" : "eye-off"}
+              size={20}
+              color="#9FB0CD"
+            />
+          </Pressable>
+        </View>
 
-        <Pressable style={styles.button} onPress={onLogin}>
-          <Text style={styles.buttonText}>Login to Dashboard</Text>
+        <Pressable style={styles.button} onPress={onLogin} disabled={loading}>
+          {loading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.buttonText}>Login to Dashboard</Text>
+          )}
         </Pressable>
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
@@ -115,6 +186,22 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.16)",
     color: "#F4F8FF",
   },
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  inputFlex: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.24)",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+    color: "#F4F8FF",
+  },
+  eyeButton: { padding: 8, marginLeft: 6 },
   button: {
     backgroundColor: "rgba(255, 255, 255, 0.2)",
     borderWidth: 1,

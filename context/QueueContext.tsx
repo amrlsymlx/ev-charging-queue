@@ -7,6 +7,7 @@ import {
 } from "react";
 
 import { calculateEtaMinutes } from "@/lib/eta";
+import { supabase } from "@/lib/supabase";
 import {
     ChargingBay,
     ChargingSession,
@@ -142,6 +143,35 @@ export function QueueProvider({ children }: PropsWithChildren) {
     };
 
     setQueueEntries((prev) => [...prev, entry]);
+
+    // Persist to Supabase in background (best-effort). Keep local entry for immediate UX.
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("queue_entries").insert([
+          {
+            name: entry.name,
+            phone_number: entry.phoneNumber,
+            plate_number: entry.plateNumber,
+            battery_percentage: entry.batteryPercentage,
+            joined_at: entry.joinedAt,
+            status: entry.status,
+            gps_validated: entry.gpsValidated,
+            gps_override_requested: entry.gpsOverrideRequested,
+            gps_override_approved: entry.gpsOverrideApproved,
+          },
+        ]);
+
+        if (!error && data && data[0] && data[0].id) {
+          const remoteId = data[0].id as string;
+          setQueueEntries((prev) =>
+            prev.map((e) => (e.id === entry.id ? { ...e, id: remoteId } : e)),
+          );
+        }
+      } catch (e) {
+        // network or other error: keep local state
+      }
+    })();
+
     return entry;
   };
 
@@ -375,6 +405,35 @@ export function QueueProvider({ children }: PropsWithChildren) {
     };
 
     setChargingSessions((prev) => [...prev, session]);
+
+    // Persist charging session to Supabase in background.
+    (async () => {
+      try {
+        const { data: inserted, error } = await supabase
+          .from("charging_sessions")
+          .insert([
+            {
+              queue_entry_id: data.queueEntryId || null,
+              bay_id: data.bayId,
+              sa_name: data.saName,
+              planned_duration_minutes: session.plannedDurationMinutes,
+              actual_duration_minutes: session.actualDurationMinutes,
+              started_at: session.startedAt || null,
+              ended_at: session.endedAt || null,
+              status: session.status,
+            },
+          ]);
+
+        if (!error && inserted && inserted[0] && inserted[0].id) {
+          const remoteId = inserted[0].id as string;
+          setChargingSessions((prev) =>
+            prev.map((s) => (s.id === session.id ? { ...s, id: remoteId } : s)),
+          );
+        }
+      } catch (e) {
+        // swallow for now
+      }
+    })();
 
     // If a queueEntryId was provided and the session is completed, mark it completed
     if (data.queueEntryId && session.status === "completed") {

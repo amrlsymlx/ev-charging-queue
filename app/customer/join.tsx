@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+    ActivityIndicator,
     Pressable,
     SafeAreaView,
     ScrollView,
@@ -11,8 +12,31 @@ import {
 } from "react-native";
 
 import { useQueue } from "@/context/QueueContext";
+import { supabase } from "@/lib/supabase";
 
-const GPS_LIMIT_METERS = 50;
+function toRadians(value: number) {
+  return (value * Math.PI) / 180;
+}
+
+function haversineMeters(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+) {
+  const R = 6371000;
+  const dLat = toRadians(lat2 - lat1);
+  const dLng = toRadians(lng2 - lng1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) *
+      Math.cos(toRadians(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 
 export default function CustomerJoinScreen() {
   const router = useRouter();
@@ -22,12 +46,72 @@ export default function CustomerJoinScreen() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [plateNumber, setPlateNumber] = useState("");
   const [batteryPercentage, setBatteryPercentage] = useState("50");
-  const [distanceMeters, setDistanceMeters] = useState("40");
+  const [currentLatitude, setCurrentLatitude] = useState("");
+  const [currentLongitude, setCurrentLongitude] = useState("");
+
+  const [showroomName, setShowroomName] = useState("Showroom");
+  const [showroomLatitude, setShowroomLatitude] = useState<number | null>(null);
+  const [showroomLongitude, setShowroomLongitude] = useState<number | null>(
+    null,
+  );
+  const [gpsLimitMeters, setGpsLimitMeters] = useState(50);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+
   const [message, setMessage] = useState<string | null>(null);
 
-  const parsedDistance = Number(distanceMeters);
+  useEffect(() => {
+    const loadShowroomSettings = async () => {
+      setLoadingSettings(true);
+      const { data, error } = await supabase
+        .from("showroom_settings")
+        .select("showroom_name, latitude, longitude, gps_radius_m")
+        .eq("id", "main")
+        .maybeSingle();
+
+      if (error) {
+        if (error.code !== "PGRST116") {
+          setMessage(error.message);
+        }
+        setLoadingSettings(false);
+        return;
+      }
+
+      if (data) {
+        setShowroomName(data.showroom_name || "Showroom");
+        setShowroomLatitude(data.latitude ?? null);
+        setShowroomLongitude(data.longitude ?? null);
+        setGpsLimitMeters(data.gps_radius_m ?? 50);
+      }
+
+      setLoadingSettings(false);
+    };
+
+    void loadShowroomSettings();
+  }, []);
+
+  const parsedCurrentLat = Number(currentLatitude);
+  const parsedCurrentLng = Number(currentLongitude);
+
+  const distanceMeters = useMemo(() => {
+    if (
+      showroomLatitude === null ||
+      showroomLongitude === null ||
+      Number.isNaN(parsedCurrentLat) ||
+      Number.isNaN(parsedCurrentLng)
+    ) {
+      return null;
+    }
+
+    return haversineMeters(
+      parsedCurrentLat,
+      parsedCurrentLng,
+      showroomLatitude,
+      showroomLongitude,
+    );
+  }, [parsedCurrentLat, parsedCurrentLng, showroomLatitude, showroomLongitude]);
+
   const gpsValidated =
-    Number.isFinite(parsedDistance) && parsedDistance <= GPS_LIMIT_METERS;
+    distanceMeters !== null && distanceMeters <= gpsLimitMeters;
 
   const handleSubmit = () => {
     const battery = Number(batteryPercentage);
@@ -45,6 +129,17 @@ export default function CustomerJoinScreen() {
     if (battery < 0 || battery > 100) {
       setMessage("Battery percentage must be between 0 and 100.");
       return;
+    }
+
+    if (loadingSettings) {
+      setMessage("Loading showroom settings. Try again shortly.");
+      return;
+    }
+
+    if (showroomLatitude === null || showroomLongitude === null) {
+      setMessage(
+        "Showroom GPS is not configured by manager yet. Your request will go to override approval.",
+      );
     }
 
     const entry = addQueueEntry({
@@ -80,19 +175,39 @@ export default function CustomerJoinScreen() {
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>GPS Validation</Text>
-          <Text style={styles.caption}>Distance from showroom (meters)</Text>
-          <TextInput
-            style={styles.input}
-            value={distanceMeters}
-            keyboardType="numeric"
-            onChangeText={setDistanceMeters}
-            placeholder="e.g. 35"
-            placeholderTextColor="#7A8495"
-          />
+          <Text style={styles.caption}>Showroom: {showroomName}</Text>
+          {loadingSettings ? (
+            <ActivityIndicator color="#D1DCF3" />
+          ) : (
+            <>
+              <TextInput
+                style={styles.input}
+                value={currentLatitude}
+                keyboardType="decimal-pad"
+                onChangeText={setCurrentLatitude}
+                placeholder="Your Latitude"
+                placeholderTextColor="#7A8495"
+              />
+              <TextInput
+                style={styles.input}
+                value={currentLongitude}
+                keyboardType="decimal-pad"
+                onChangeText={setCurrentLongitude}
+                placeholder="Your Longitude"
+                placeholderTextColor="#7A8495"
+              />
+              <Text style={styles.caption}>
+                Radius limit: {gpsLimitMeters}m
+                {distanceMeters === null
+                  ? ""
+                  : ` | Distance: ${Math.round(distanceMeters)}m`}
+              </Text>
+            </>
+          )}
           <Text style={gpsValidated ? styles.gpsOk : styles.gpsWarning}>
             {gpsValidated
-              ? "Within 50m: registration is allowed."
-              : "Outside 50m: registration will create a GPS override request."}
+              ? "Within configured radius: registration is allowed."
+              : "Outside configured radius or location unavailable: registration will create a GPS override request."}
           </Text>
         </View>
 
