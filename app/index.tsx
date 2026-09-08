@@ -66,8 +66,8 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.22)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 24,
     paddingVertical: 18,
     paddingHorizontal: 10,
@@ -148,8 +148,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.24)",
+    borderWidth: 0,
+    borderColor: "transparent",
     flex: 1,
   },
   secondaryActionButtonRow: {
@@ -159,8 +159,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(132, 158, 255, 0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(196, 210, 255, 0.32)",
+    borderWidth: 0,
+    borderColor: "transparent",
     flex: 1,
   },
   adminActionButtonRow: {
@@ -170,8 +170,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(124, 255, 186, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(124, 255, 186, 0.22)",
+    borderWidth: 0,
+    borderColor: "transparent",
     flex: 1,
   },
   bgCircleOne: {

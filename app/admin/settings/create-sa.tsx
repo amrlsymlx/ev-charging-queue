@@ -237,8 +237,8 @@ export default function CreateSaScreen() {
             {
               marginTop: 8,
               backgroundColor: "transparent",
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.12)",
+              borderWidth: 0,
+              borderColor: "transparent",
             },
           ]}
           onPress={checkFunctionConnectivity}
@@ -292,8 +292,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, color: "#F6FAFF", fontWeight: "700" },
   subtitle: { color: "#9FB0CD", marginBottom: 8 },
   input: {
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 8,
     padding: 10,
     color: "#F4F8FF",
@@ -307,8 +307,8 @@ const styles = StyleSheet.create({
   },
   inputFlex: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 8,
     padding: 10,
     color: "#F4F8FF",

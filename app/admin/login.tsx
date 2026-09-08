@@ -239,8 +239,8 @@ const styles = StyleSheet.create({
   titleCentered: { textAlign: "center" },
   fieldSpacing: { marginBottom: 12 },
   input: {
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 10,
     padding: 10,
     backgroundColor: "rgba(255,255,255,0.08)",
@@ -253,8 +253,8 @@ const styles = StyleSheet.create({
   },
   inputFlex: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -275,8 +275,8 @@ const styles = StyleSheet.create({
   buttonText: { color: "#FFF6F2", fontWeight: "700" },
   secondaryButton: {
     backgroundColor: "transparent",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
+    borderWidth: 0,
+    borderColor: "transparent",
     paddingVertical: 10,
     borderRadius: 10,
     alignItems: "center",

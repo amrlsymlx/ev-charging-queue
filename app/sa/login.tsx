@@ -210,8 +210,8 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.22)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 20,
     padding: 18,
     gap: 12,
@@ -237,8 +237,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   input: {
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.24)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -252,8 +252,8 @@ const styles = StyleSheet.create({
   },
   inputFlex: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.24)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -263,8 +263,8 @@ const styles = StyleSheet.create({
   eyeButton: { padding: 8, marginLeft: 6 },
   button: {
     backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.24)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: "center",

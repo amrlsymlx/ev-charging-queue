@@ -4,14 +4,14 @@ import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from "react-native";
 import MapView, { Circle, Marker } from "react-native-maps";
 
@@ -338,8 +338,8 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 20, color: "#F6FAFF", fontWeight: "700" },
   input: {
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.12)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 8,
     padding: 10,
     color: "#F4F8FF",
@@ -358,8 +358,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 10,
     backgroundColor: "rgba(255,255,255,0.03)",
-    borderColor: "rgba(255,255,255,0.1)",
-    borderWidth: 1,
+    borderColor: "transparent",
+    borderWidth: 0,
     borderRadius: 10,
     padding: 10,
     gap: 8,
@@ -369,8 +369,8 @@ const styles = StyleSheet.create({
   searchSpinner: { position: "absolute", right: 10, top: 12 },
   searchResults: {
     backgroundColor: "#101828",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 8,
     marginTop: -4,
     marginBottom: 8,
@@ -395,8 +395,8 @@ const styles = StyleSheet.create({
   secondaryButton: {
     flex: 1,
     backgroundColor: "rgba(255,255,255,0.08)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 8,
     paddingVertical: 10,
     alignItems: "center",

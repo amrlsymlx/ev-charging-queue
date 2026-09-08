@@ -292,8 +292,8 @@ const styles = StyleSheet.create({
   searchResults: {
     maxHeight: 180,
     backgroundColor: "#101828",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 8,
     marginTop: -4,
     marginBottom: 8,
@@ -310,8 +310,8 @@ const styles = StyleSheet.create({
   mapHost: {
     borderRadius: 8,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
+    borderWidth: 0,
+    borderColor: "transparent",
   },
   coordRow: { flexDirection: "row", gap: 8 },
   coordInput: { flex: 1 },

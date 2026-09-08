@@ -6,16 +6,16 @@ import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Modal,
-  Platform,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
+    ActivityIndicator,
+    Modal,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    View,
 } from "react-native";
 
 type SAAccount = {
@@ -571,8 +571,8 @@ export default function AdminDashboard() {
                   styles.primaryButton,
                   {
                     backgroundColor: "transparent",
-                    borderWidth: 1,
-                    borderColor: "rgba(196,210,255,0.32)",
+                    borderWidth: 0,
+                    borderColor: "transparent",
                     flex: 1,
                   },
                 ]}
@@ -658,8 +658,8 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: "rgba(132, 158, 255, 0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(196, 210, 255, 0.32)",
+    borderWidth: 0,
+    borderColor: "transparent",
     borderRadius: 10,
     alignItems: "center",
     paddingVertical: 10,
@@ -726,8 +726,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(12,16,26,0.98)",
     borderRadius: 12,
     padding: 18,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
+    borderWidth: 0,
+    borderColor: "transparent",
   },
   modalTitle: {
     color: "#F6FAFF",
