@@ -2,21 +2,28 @@ import { Ionicons } from "@expo/vector-icons";
 // @ts-ignore: optional native dependency may not be installed in web/dev environment
 import Slider from "@react-native-community/slider";
 import { useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Modal,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Animated,
+  Modal,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
+import LocationPickerCard from "../../components/LocationPickerCard";
 import { useQueue } from "../../context/QueueContext";
+import { showAlert } from "../../lib/alert";
+import { calculateEtaMinutes, formatMinutes } from "../../lib/eta";
+import { getSecureItem } from "../../lib/secureStorage";
 import { supabase } from "../../lib/supabase";
+
+const CUSTOMER_GPS_TEST_KEY = "customer_gps_test_enabled";
 
 function toRadians(value: number): number {
   return (value * Math.PI) / 180;
@@ -70,7 +77,7 @@ function toSafeBatteryValue(value: unknown): number {
 
 export default function CustomerJoinScreen() {
   const router = useRouter();
-  const { addQueueEntry } = useQueue();
+  const { addQueueEntry, waitingEntries, bays } = useQueue();
 
   const [name, setName] = useState("");
   const [phonePrefix, setPhonePrefix] = useState("+6017");
@@ -81,6 +88,7 @@ export default function CustomerJoinScreen() {
   const [batteryPercentage, setBatteryPercentage] = useState<number>(50);
   const [currentLatitude, setCurrentLatitude] = useState("");
   const [currentLongitude, setCurrentLongitude] = useState("");
+  const [gpsTestEnabled, setGpsTestEnabled] = useState(true);
 
   const [showroomName, setShowroomName] = useState("Showroom");
   const [showroomLatitude, setShowroomLatitude] = useState<number | null>(null);
@@ -99,7 +107,7 @@ export default function CustomerJoinScreen() {
       setLoadingSettings(true);
       const { data, error } = await supabase
         .from("showroom_settings")
-        .select("showroom_name, latitude, longitude, gps_radius_m")
+        .select("*")
         .eq("id", "main")
         .maybeSingle();
 
@@ -118,11 +126,63 @@ export default function CustomerJoinScreen() {
         setGpsLimitMeters(data.gps_radius_m ?? 50);
       }
 
+      try {
+        const raw = await getSecureItem(CUSTOMER_GPS_TEST_KEY);
+        if (raw === null) {
+          setGpsTestEnabled(true);
+        } else {
+          setGpsTestEnabled(raw === "1");
+        }
+      } catch {
+        setGpsTestEnabled(true);
+      }
+
       setLoadingSettings(false);
     };
 
     void loadShowroomSettings();
   }, []);
+
+  const handleRetryLocation = async () => {
+    setMessage(
+      "Retrying location... (permission/location logic not yet implemented)",
+    );
+    console.debug("Retrying location request - placeholder");
+    // Future: trigger permissions and attempt to read device location here.
+  };
+
+  const estimatedWaitMinutes = useMemo(() => {
+    try {
+      const eligible = (waitingEntries || []).filter(
+        (e) => e.gpsValidated || e.gpsOverrideApproved,
+      ).length;
+      const position = eligible + 1;
+      const bayCount = (bays && bays.length) || 2;
+      return calculateEtaMinutes(position, bayCount);
+    } catch (e) {
+      return null;
+    }
+  }, [waitingEntries, bays]);
+
+  const estimatedWait = useMemo(() => {
+    if (estimatedWaitMinutes === null) return "--";
+    return formatMinutes(estimatedWaitMinutes);
+  }, [estimatedWaitMinutes]);
+
+  const formatStartFromMinutes = (minutes: number) => {
+    const d = new Date(Date.now() + minutes * 60000);
+    let hours = d.getHours();
+    const mins = d.getMinutes();
+    const ampm = hours >= 12 ? "pm" : "am";
+    hours = hours % 12;
+    if (hours === 0) hours = 12;
+    return `${hours}.${mins.toString().padStart(2, "0")}${ampm}`;
+  };
+
+  const estimatedStart = useMemo(() => {
+    if (!estimatedWaitMinutes) return "--";
+    return formatStartFromMinutes(estimatedWaitMinutes);
+  }, [estimatedWaitMinutes]);
 
   const parsedCurrentLat = Number(currentLatitude);
   const parsedCurrentLng = Number(currentLongitude);
@@ -147,6 +207,45 @@ export default function CustomerJoinScreen() {
 
   const gpsValidated =
     distanceMeters !== null && distanceMeters <= gpsLimitMeters;
+
+  const gpsStatus = useMemo<"denied" | "out" | "valid" | "unknown">(() => {
+    const latEmpty = currentLatitude === "";
+    const lngEmpty = currentLongitude === "";
+    const latNaN = Number.isNaN(parsedCurrentLat);
+    const lngNaN = Number.isNaN(parsedCurrentLng);
+
+    if (latEmpty || lngEmpty || latNaN || lngNaN) return "denied";
+    if (distanceMeters === null) return "unknown";
+    return distanceMeters <= gpsLimitMeters ? "valid" : "out";
+  }, [
+    currentLatitude,
+    currentLongitude,
+    parsedCurrentLat,
+    parsedCurrentLng,
+    distanceMeters,
+    gpsLimitMeters,
+  ]);
+
+  const blink = useRef(new Animated.Value(1));
+
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(blink.current, {
+          toValue: 0.25,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(blink.current, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    anim.start();
+    return () => anim.stop();
+  }, []);
 
   const handleSubmit = () => {
     if (!agreed) {
@@ -223,10 +322,20 @@ export default function CustomerJoinScreen() {
       gpsOverrideRequested: !gpsValidated,
     });
 
+    if (gpsValidated) {
+      setMessage("Queue join success, track your queue now.");
+      showAlert("Queue join success", "Track your queue now", [
+        { text: "Later", style: "cancel" },
+        {
+          text: "Track Queue",
+          onPress: () => router.push("/customer/track"),
+        },
+      ]);
+      return;
+    }
+
     setMessage(
-      gpsValidated
-        ? "Queue created successfully. Redirecting to status page..."
-        : "Override request submitted. You can monitor status while waiting for SA approval.",
+      "Override request submitted. You can monitor status while waiting for SA approval.",
     );
 
     router.push({
@@ -241,53 +350,73 @@ export default function CustomerJoinScreen() {
       <View style={styles.bgGlowTwo} />
       <ScrollView
         contentContainerStyle={styles.content}
-        style={{ overflow: "visible" }}
+        showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.heading}>Join Queue</Text>
-        <Text style={styles.subheading}>
-          Complete GPS check and submit your registration.
+        <Text style={[styles.heading, styles.headingCentered]}>Join Queue</Text>
+        <Text style={[styles.subheading, styles.subheadingCentered]}>
+          Allow location check and submit Queue Register
         </Text>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>GPS Validation</Text>
-          <Text style={styles.caption}>Showroom: {showroomName}</Text>
-          {loadingSettings ? (
-            <ActivityIndicator color="#D1DCF3" />
-          ) : (
-            <>
-              <TextInput
-                style={styles.input}
-                value={currentLatitude}
-                keyboardType="decimal-pad"
-                onChangeText={setCurrentLatitude}
-                placeholder="Your Latitude"
-                placeholderTextColor="#7A8495"
-              />
-              <TextInput
-                style={styles.input}
-                value={currentLongitude}
-                keyboardType="decimal-pad"
-                onChangeText={setCurrentLongitude}
-                placeholder="Your Longitude"
-                placeholderTextColor="#7A8495"
-              />
-              <Text style={styles.caption}>
-                Radius limit: {gpsLimitMeters}m
-                {distanceMeters === null
-                  ? ""
-                  : ` | Distance: ${Math.round(distanceMeters)}m`}
-              </Text>
-            </>
-          )}
-          <Text style={gpsValidated ? styles.gpsOk : styles.gpsWarning}>
-            {gpsValidated
-              ? "Within configured radius: registration is allowed."
-              : "Outside configured radius or location unavailable: registration will create a GPS override request."}
+          <Text style={[styles.sectionTitle, styles.sectionTitleCentered]}>
+            Queue Register
           </Text>
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Registration Form</Text>
+          <Text style={[styles.etaBadge, styles.caption]}>
+            Estimated wait: {estimatedWait}
+            {estimatedStart && estimatedStart !== "--"
+              ? ` (Start charging at ${estimatedStart})`
+              : ""}
+          </Text>
+          <Animated.View
+            style={
+              gpsStatus === "valid"
+                ? [
+                    styles.gpsIndicator,
+                    styles.gpsIndicatorValid,
+                    { opacity: blink.current },
+                  ]
+                : gpsStatus === "out"
+                  ? [
+                      styles.gpsIndicator,
+                      styles.gpsIndicatorOut,
+                      { opacity: blink.current },
+                    ]
+                  : [
+                      styles.gpsIndicator,
+                      styles.gpsIndicatorDenied,
+                      { opacity: blink.current },
+                    ]
+            }
+          />
+          {gpsStatus === "denied" ? (
+            <Text style={[styles.gpsDenied, styles.gpsStatusCentered]}>
+              Location access not allowed or unavailable. Please enable location
+              access and try again. Or ask SA on duty to approve.
+            </Text>
+          ) : gpsStatus === "valid" ? (
+            <Text style={[styles.gpsOk, styles.gpsStatusCentered]}>
+              Location approved. Proceed with registration.
+            </Text>
+          ) : gpsStatus === "out" ? (
+            <Text style={[styles.gpsOut, styles.gpsStatusCentered]}>
+              Outside showroom location, please try again. Or ask SA on duty to
+              approve.
+            </Text>
+          ) : (
+            <Text style={[styles.gpsOut, styles.gpsStatusCentered]}>
+              Error. Ask SA on duty to approve.
+            </Text>
+          )}
+          {gpsStatus !== "valid" ? (
+            <Pressable
+              style={styles.retryButton}
+              onPress={() => {
+                void handleRetryLocation();
+              }}
+            >
+              <Text style={styles.retryButtonText}>Try again</Text>
+            </Pressable>
+          ) : null}
           <TextInput
             style={styles.input}
             value={name}
@@ -308,10 +437,13 @@ export default function CustomerJoinScreen() {
                 },
               ]}
             >
-              <Text style={{ color: "#F4F8FF", marginRight: 6 }}>
-                {phonePrefix}
-              </Text>
-              <Ionicons name="chevron-down" size={14} color="#F4F8FF" />
+              <Ionicons
+                name="chevron-down"
+                size={14}
+                color="#F4F8FF"
+                style={{ marginRight: 6 }}
+              />
+              <Text style={{ color: "#F4F8FF" }}>{phonePrefix}</Text>
             </Pressable>
 
             <TextInput
@@ -426,10 +558,63 @@ export default function CustomerJoinScreen() {
             disabled={!agreed}
           >
             <Text style={styles.primaryButtonText}>
-              {gpsValidated ? "Join Queue" : "Request Override and Join"}
+              {gpsStatus === "valid"
+                ? "Join"
+                : "Join (Request approval from SA on duty)"}
             </Text>
           </Pressable>
         </View>
+
+        <Pressable
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            marginTop: 12,
+          }}
+          onPress={() => router.push("/customer/track")}
+          accessibilityLabel="Track Queue"
+        >
+          <Ionicons
+            name="search"
+            size={16}
+            color="#C4D2FF"
+            style={{ marginRight: 8 }}
+          />
+          <Text style={styles.linkText}>Track Queue</Text>
+        </Pressable>
+
+        <Pressable
+          style={{ alignItems: "center", marginTop: 8 }}
+          onPress={() => router.push("/")}
+        >
+          <Text style={styles.linkText}>Back to main page</Text>
+        </Pressable>
+
+        {loadingSettings ? (
+          <View style={styles.sectionCard}>
+            <ActivityIndicator color="#D1DCF3" />
+          </View>
+        ) : gpsTestEnabled ? (
+          <LocationPickerCard
+            latitude={currentLatitude}
+            longitude={currentLongitude}
+            onChangeCoordinates={(latitude, longitude) => {
+              setCurrentLatitude(latitude);
+              setCurrentLongitude(longitude);
+            }}
+            enabled={gpsTestEnabled}
+            onToggleEnabled={setGpsTestEnabled}
+            referenceLatitude={showroomLatitude ?? 3.139}
+            referenceLongitude={showroomLongitude ?? 101.6869}
+            radiusMeters={gpsLimitMeters}
+            helperText={`Showroom: ${showroomName} | Radius limit: ${gpsLimitMeters}m${
+              distanceMeters === null
+                ? ""
+                : ` | Distance: ${Math.round(distanceMeters)}m`
+            }`}
+          />
+        ) : null}
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
@@ -492,10 +677,17 @@ export default function CustomerJoinScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#070D1A" },
-  content: { padding: 18, gap: 14, paddingBottom: 34 },
+  container: {
+    flex: 1,
+    backgroundColor: "#070D1A",
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+  },
+  content: { padding: 16, gap: 14, paddingBottom: 34 },
   heading: { color: "#F4F8FF", fontSize: 26, fontWeight: "800" },
   subheading: { color: "#C4D3EE", marginBottom: 6, lineHeight: 20 },
+  headingCentered: { textAlign: "center", width: "100%" },
+  subheadingCentered: { textAlign: "center", width: "100%" },
   sectionCard: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 0,
@@ -511,7 +703,17 @@ const styles = StyleSheet.create({
     overflow: "visible",
   },
   sectionTitle: { fontWeight: "700", fontSize: 17, color: "#F6FAFF" },
+  sectionTitleCentered: { textAlign: "center", width: "100%" },
   caption: { fontSize: 13, color: "#D1DCF3" },
+  etaBadge: {
+    alignSelf: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  linkText: { color: "#C4D2FF", textAlign: "center" },
   input: {
     borderWidth: 0,
     borderColor: "transparent",
@@ -522,7 +724,20 @@ const styles = StyleSheet.create({
     color: "#F4F8FF",
   },
   gpsOk: { color: "#7CFFBA", fontWeight: "600" },
-  gpsWarning: { color: "#FFD0A8", fontWeight: "600", zIndex: 0 },
+  gpsOut: { color: "#FFD0A8", fontWeight: "600", zIndex: 0 },
+  gpsDenied: { color: "#FF6B6B", fontWeight: "700", zIndex: 0 },
+  gpsStatusCentered: { textAlign: "center", width: "100%", marginBottom: 8 },
+  gpsIndicator: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignSelf: "center",
+    marginTop: 6,
+    marginBottom: 6,
+  },
+  gpsIndicatorValid: { backgroundColor: "#7CFFBA" },
+  gpsIndicatorOut: { backgroundColor: "#FFD0A8" },
+  gpsIndicatorDenied: { backgroundColor: "#FF6B6B" },
   primaryButton: {
     backgroundColor: "rgba(255, 255, 255, 0.2)",
     borderWidth: 1,
@@ -641,4 +856,14 @@ const styles = StyleSheet.create({
     opacity: 1,
   },
   formattedPlate: { color: "#C4D3EE", marginTop: 8, fontSize: 13 },
+  retryButton: {
+    marginTop: 8,
+    alignItems: "center",
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "transparent",
+  },
+  retryButtonText: { color: "#C4D2FF", fontWeight: "700" },
 });

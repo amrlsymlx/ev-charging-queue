@@ -7,6 +7,7 @@ export default function RootLayout() {
     <QueueProvider>
       <Stack
         screenOptions={{
+          headerShown: false,
           headerStyle: { backgroundColor: "#0B1020" },
           headerTintColor: "#EAF2FF",
           headerTitleStyle: { fontWeight: "700" },

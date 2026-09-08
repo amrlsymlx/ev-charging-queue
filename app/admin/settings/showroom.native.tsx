@@ -13,19 +13,16 @@ import {
   TextInput,
   View,
 } from "react-native";
+import MapView, { Circle, Marker } from "react-native-maps";
 
 const DEFAULT_LATITUDE = 3.139;
 const DEFAULT_LONGITUDE = 101.6869;
+const DEFAULT_DELTA = 0.01;
 const SEARCH_DEBOUNCE_MS = 500;
 
-type LeafletModule = {
-  MapContainer: any;
-  TileLayer: any;
-  CircleMarker: any;
-  Circle: any;
-  useMap: any;
-  useMapEvents: any;
-};
+function toFixedCoord(value: number): string {
+  return value.toFixed(6);
+}
 
 function parseOrDefault(value: string, fallback: number): number {
   const parsed = Number.parseFloat(value);
@@ -41,63 +38,35 @@ export default function ShowroomSettingsScreen() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [leaflet, setLeaflet] = useState<LeafletModule | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<GeocodeResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [region, setRegion] = useState({
+    latitude: DEFAULT_LATITUDE,
+    longitude: DEFAULT_LONGITUDE,
+    latitudeDelta: DEFAULT_DELTA,
+    longitudeDelta: DEFAULT_DELTA,
+  });
 
   const parsedLat = parseOrDefault(lat, DEFAULT_LATITUDE);
   const parsedLng = parseOrDefault(lng, DEFAULT_LONGITUDE);
   const parsedRadius = parseOrDefault(radius, 50);
 
+  const applyPickedLocation = (latitude: number, longitude: number) => {
+    setLat(toFixedCoord(latitude));
+    setLng(toFixedCoord(longitude));
+    setRegion((prev) => ({
+      ...prev,
+      latitude,
+      longitude,
+    }));
+  };
+
   const openExternalMap = async () => {
     const url = `https://www.openstreetmap.org/?mlat=${parsedLat}&mlon=${parsedLng}#map=17/${parsedLat}/${parsedLng}`;
     await Linking.openURL(url);
-  };
-
-  const load = async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from("showroom_settings")
-      .select("showroom_name, latitude, longitude, gps_radius_m")
-      .eq("id", "main")
-      .maybeSingle();
-
-    if (data) {
-      setShowroomName(data.showroom_name || "Main Showroom");
-      setLat(String(data.latitude ?? ""));
-      setLng(String(data.longitude ?? ""));
-      setRadius(String(data.gps_radius_m ?? 50));
-    }
-
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    void load();
-  }, []);
-
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-
-    if (!document.getElementById("leaflet-css")) {
-      const link = document.createElement("link");
-      link.id = "leaflet-css";
-      link.rel = "stylesheet";
-      link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      link.crossOrigin = "";
-      document.head.appendChild(link);
-    }
-
-    const mod = require("react-leaflet") as LeafletModule;
-    setLeaflet(mod);
-  }, []);
-
-  const applyPickedLocation = (latitude: number, longitude: number) => {
-    setLat(latitude.toFixed(6));
-    setLng(longitude.toFixed(6));
   };
 
   const onChangeSearchQuery = (value: string) => {
@@ -131,6 +100,49 @@ export default function ShowroomSettingsScreen() {
     setSearchResults([]);
   };
 
+  const load = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from("showroom_settings")
+      .select("showroom_name, latitude, longitude, gps_radius_m")
+      .eq("id", "main")
+      .maybeSingle();
+
+    if (data) {
+      setShowroomName(data.showroom_name || "Main Showroom");
+      setLat(String(data.latitude ?? ""));
+      setLng(String(data.longitude ?? ""));
+      setRadius(String(data.gps_radius_m ?? 50));
+
+      const loadedLat =
+        typeof data.latitude === "number" ? data.latitude : DEFAULT_LATITUDE;
+      const loadedLng =
+        typeof data.longitude === "number" ? data.longitude : DEFAULT_LONGITUDE;
+      setRegion((prev) => ({
+        ...prev,
+        latitude: loadedLat,
+        longitude: loadedLng,
+      }));
+    }
+
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  useEffect(() => {
+    const nextLat = Number.parseFloat(lat);
+    const nextLng = Number.parseFloat(lng);
+    if (!Number.isFinite(nextLat) || !Number.isFinite(nextLng)) return;
+    setRegion((prev) => ({
+      ...prev,
+      latitude: nextLat,
+      longitude: nextLng,
+    }));
+  }, [lat, lng]);
+
   const onSave = async () => {
     setSaving(true);
     setMessage(null);
@@ -160,73 +172,6 @@ export default function ShowroomSettingsScreen() {
     setSaving(false);
     setMessage("Showroom settings saved.");
     router.replace("/admin/dashboard");
-  };
-
-  const WebMap = () => {
-    if (!leaflet) {
-      return (
-        <Text style={styles.mapFallbackText}>Loading interactive map...</Text>
-      );
-    }
-
-    const {
-      MapContainer,
-      TileLayer,
-      CircleMarker,
-      Circle,
-      useMap,
-      useMapEvents,
-    } = leaflet;
-
-    const MapClickHandler = () => {
-      useMapEvents({
-        click: (event: any) => {
-          const { lat: latitude, lng: longitude } = event.latlng;
-          applyPickedLocation(latitude, longitude);
-        },
-      });
-      return null;
-    };
-
-    const SyncMapCenter = () => {
-      const map = useMap();
-      useEffect(() => {
-        map.setView([parsedLat, parsedLng]);
-      }, [map, parsedLat, parsedLng]);
-      return null;
-    };
-
-    return (
-      <View style={styles.mapHost}>
-        <MapContainer
-          center={[parsedLat, parsedLng]}
-          zoom={16}
-          scrollWheelZoom
-          style={styles.webLeafletMap as any}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <Circle
-            center={[parsedLat, parsedLng]}
-            radius={parsedRadius}
-            pathOptions={{
-              color: "#2563eb",
-              fillColor: "#2563eb",
-              fillOpacity: 0.15,
-            }}
-          />
-          <CircleMarker
-            center={[parsedLat, parsedLng]}
-            pathOptions={{ color: "#2563eb", fillColor: "#60a5fa" }}
-            radius={10}
-          />
-          <MapClickHandler />
-          <SyncMapCenter />
-        </MapContainer>
-      </View>
-    );
   };
 
   return (
@@ -273,10 +218,6 @@ export default function ShowroomSettingsScreen() {
 
               <View style={styles.mapCard}>
                 <Text style={styles.mapTitle}>Map Picker</Text>
-                <Text style={styles.mapFallbackText}>
-                  Search for an address or click directly on the map to pick
-                  latitude and longitude.
-                </Text>
 
                 <View style={styles.searchWrap}>
                   <TextInput
@@ -315,7 +256,36 @@ export default function ShowroomSettingsScreen() {
                   ) : null}
                 </View>
 
-                <WebMap />
+                <MapView
+                  style={styles.map}
+                  region={region}
+                  onRegionChangeComplete={setRegion}
+                  onPress={(event) => {
+                    const coordinate = event.nativeEvent.coordinate;
+                    applyPickedLocation(
+                      coordinate.latitude,
+                      coordinate.longitude,
+                    );
+                  }}
+                >
+                  <Circle
+                    center={{ latitude: parsedLat, longitude: parsedLng }}
+                    radius={parsedRadius}
+                    strokeColor="#2563eb"
+                    fillColor="rgba(37, 99, 235, 0.15)"
+                  />
+                  <Marker
+                    coordinate={{ latitude: parsedLat, longitude: parsedLng }}
+                    draggable
+                    onDragEnd={(event) => {
+                      const coordinate = event.nativeEvent.coordinate;
+                      applyPickedLocation(
+                        coordinate.latitude,
+                        coordinate.longitude,
+                      );
+                    }}
+                  />
+                </MapView>
 
                 <View style={styles.mapActionsRow}>
                   <Pressable
@@ -323,6 +293,16 @@ export default function ShowroomSettingsScreen() {
                     onPress={openExternalMap}
                   >
                     <Text style={styles.secondaryButtonText}>Open in map</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.secondaryButton}
+                    onPress={() =>
+                      applyPickedLocation(region.latitude, region.longitude)
+                    }
+                  >
+                    <Text style={styles.secondaryButtonText}>
+                      Use map center
+                    </Text>
                   </Pressable>
                 </View>
               </View>
@@ -385,7 +365,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   mapTitle: { color: "#F4F8FF", fontWeight: "700" },
-  mapFallbackText: { color: "#C4D3EE", lineHeight: 18 },
   searchWrap: { position: "relative", zIndex: 20 },
   searchSpinner: { position: "absolute", right: 10, top: 12 },
   searchResults: {
@@ -404,15 +383,10 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(255,255,255,0.08)",
   },
   searchResultText: { color: "#E8F0FF" },
-  mapHost: {
-    borderRadius: 8,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.14)",
-  },
-  webLeafletMap: {
-    height: 260,
+  map: {
     width: "100%",
+    height: 220,
+    borderRadius: 8,
   },
   mapActionsRow: {
     flexDirection: "row",

@@ -48,7 +48,7 @@ export default function CreateSaScreen() {
       } = await supabase.auth.getSession();
 
       if (!session?.access_token) {
-        setMessage("Manager session missing. Please login again.");
+        setMessage("Manager session missing. Please Login again.");
         setSaving(false);
         return;
       }
@@ -115,7 +115,7 @@ export default function CreateSaScreen() {
       } = await supabase.auth.getSession();
 
       if (!session?.access_token) {
-        setMessage("Manager session missing — login as manager first.");
+        setMessage("Manager session missing — Login as manager first.");
         setCheckingFn(false);
         return;
       }

@@ -1,19 +1,21 @@
 import { useQueue } from "@/context/QueueContext";
 import { promptForInput, showAlert } from "@/lib/alert";
+import { getSecureItem, setSecureItem } from "@/lib/secureStorage";
 import { SUPABASE_URL, supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Modal,
-    Platform,
-    Pressable,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Modal,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
 } from "react-native";
 
 type SAAccount = {
@@ -22,6 +24,8 @@ type SAAccount = {
   email: string;
   password_plaintext?: string | null;
 };
+
+const CUSTOMER_GPS_TEST_KEY = "customer_gps_test_enabled";
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -42,6 +46,7 @@ export default function AdminDashboard() {
   const [showroomLat, setShowroomLat] = useState("");
   const [showroomLng, setShowroomLng] = useState("");
   const [gpsRadiusM, setGpsRadiusM] = useState("50");
+  const [gpsTestEnabled, setGpsTestEnabled] = useState(false);
   const [loadingShowroom, setLoadingShowroom] = useState(false);
 
   useEffect(() => {
@@ -61,8 +66,22 @@ export default function AdminDashboard() {
     verify();
     loadAccounts();
     loadShowroom();
+    void loadLocalGpsTestToggle();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const loadLocalGpsTestToggle = async () => {
+    try {
+      const raw = await getSecureItem(CUSTOMER_GPS_TEST_KEY);
+      if (raw === null) {
+        setGpsTestEnabled(true);
+        return;
+      }
+      setGpsTestEnabled(raw === "1");
+    } catch {
+      setGpsTestEnabled(true);
+    }
+  };
 
   const loadAccounts = async () => {
     setLoadingAccounts(true);
@@ -79,7 +98,7 @@ export default function AdminDashboard() {
     setLoadingShowroom(true);
     const { data, error } = await supabase
       .from("showroom_settings")
-      .select("showroom_name, latitude, longitude, gps_radius_m")
+      .select("*")
       .eq("id", "main")
       .maybeSingle();
 
@@ -150,7 +169,25 @@ export default function AdminDashboard() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.heading}>Manager Dashboard</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.heading}>Manager Dashboard</Text>
+          {tab === "home" ? (
+            <Pressable
+              onPress={async () => {
+                try {
+                  await supabase.auth.signOut();
+                } catch {
+                  // ignore
+                }
+                router.replace("/admin/login");
+              }}
+              style={styles.logoutButton}
+              accessibilityLabel="Logout"
+            >
+              <Ionicons name="log-out" size={20} color="#F6FAFF" />
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       {checkingAuth ? <ActivityIndicator color="#D1DCF3" /> : null}
@@ -166,7 +203,7 @@ export default function AdminDashboard() {
               .map((s) => (
                 <View key={s.id} style={styles.rowWrap}>
                   <Text style={styles.row}>
-                    {s.saName} — {s.bayId}
+                    {s.saName} - {s.bayId}
                   </Text>
                   <Text style={styles.row}>{s.status}</Text>
                 </View>
@@ -192,6 +229,12 @@ export default function AdminDashboard() {
                 </View>
               ))}
             </View>
+            <Pressable
+              style={{ alignItems: "center", marginTop: 8 }}
+              onPress={() => router.push("/")}
+            >
+              <Text style={styles.linkText}>Back to main page</Text>
+            </Pressable>
           </>
         )}
 
@@ -280,7 +323,7 @@ export default function AdminDashboard() {
 
                                     if (!session?.access_token) {
                                       setMessage(
-                                        "Manager session missing. Please login again.",
+                                        "Manager session missing. Please Login again.",
                                       );
                                       return;
                                     }
@@ -399,6 +442,43 @@ export default function AdminDashboard() {
               >
                 <Text style={styles.buttonText}>Edit Showroom Settings</Text>
               </Pressable>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>
+                Customer GPS Test (Developer Mode)
+              </Text>
+              <Text style={styles.rowMuted}>
+                Toggle whether customers can use the GPS test UI in the Join
+                Queue page.
+              </Text>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginTop: 8,
+                }}
+              >
+                <Switch
+                  value={gpsTestEnabled}
+                  onValueChange={async (v) => {
+                    if (checkingAuth || !isManagerSession) {
+                      setMessage("Not authorized to change this setting.");
+                      return;
+                    }
+                    setGpsTestEnabled(v);
+                    try {
+                      await setSecureItem(CUSTOMER_GPS_TEST_KEY, v ? "1" : "0");
+                    } catch {
+                      setMessage("Failed to save local developer toggle.");
+                    }
+                  }}
+                  disabled={checkingAuth || !isManagerSession}
+                />
+                <Text style={{ color: "#D1DCF3", marginLeft: 8 }}>
+                  {gpsTestEnabled ? "Enabled" : "Disabled"}
+                </Text>
+              </View>
             </View>
           </>
         )}
@@ -546,12 +626,20 @@ export default function AdminDashboard() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#070D1A" },
   header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
   content: { padding: 16, paddingBottom: 96 },
   heading: { fontSize: 20, color: "#F6FAFF", fontWeight: "700" },
   card: {
     backgroundColor: "rgba(255,255,255,0.08)",
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 14,
+    padding: 16,
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
     marginBottom: 12,
   },
   cardTitle: {
@@ -581,6 +669,8 @@ const styles = StyleSheet.create({
   buttonText: { color: "#F8FBFF", fontWeight: "700" },
   listHeading: { color: "#E0EBFF", fontWeight: "700", marginBottom: 8 },
   message: { color: "#FFD0A8", marginTop: 8, textAlign: "center" },
+  linkText: { color: "#C4D2FF", textAlign: "center" },
+  logoutButton: { padding: 8 },
   tabBar: {
     position: "absolute",
     left: 0,

@@ -1,39 +1,55 @@
 import { Link } from "expo-router";
+import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import { supabase } from "../lib/supabase";
 
 export default function Index() {
+  const [showroomName, setShowroomName] = useState("Showroom");
+
+  useEffect(() => {
+    const loadShowroom = async () => {
+      const { data, error } = await supabase
+        .from("showroom_settings")
+        .select("showroom_name")
+        .eq("id", "main")
+        .maybeSingle();
+
+      if (!error && data) {
+        setShowroomName(data.showroom_name || "Showroom");
+      }
+    };
+
+    void loadShowroom();
+  }, []);
+
   return (
     <View style={styles.container}>
       <View style={styles.bgCircleOne} />
       <View style={styles.bgCircleTwo} />
 
       <View style={styles.card}>
-        <Text style={styles.eyebrow}>Showroom Queue</Text>
-        <Text style={styles.title}>EV Charging Queue System</Text>
-        <Text style={styles.subtitle}>
-          Scan, register, wait, and charge. Live updates for customers and
-          service advisors.
-        </Text>
+        <Text style={styles.eyebrow}>{showroomName}</Text>
+        <Text style={styles.title}>EV Charger Queue Management</Text>
 
-        <Link href="/customer" asChild>
-          <Pressable style={styles.primaryActionButton}>
-            <Text style={styles.primaryButtonText}>Customer QR Landing</Text>
-          </Pressable>
-        </Link>
+        <View style={styles.buttonRow}>
+          <Link href="/customer" asChild>
+            <Pressable style={styles.primaryActionButtonRow}>
+              <Text style={styles.primaryButtonText}>Customer QR Landing</Text>
+            </Pressable>
+          </Link>
 
-        <Link href="/sa/login" asChild>
-          <Pressable style={styles.secondaryActionButton}>
-            <Text style={styles.secondaryButtonText}>
-              Service Advisor Dashboard
-            </Text>
-          </Pressable>
-        </Link>
+          <Link href="/sa/login" asChild>
+            <Pressable style={styles.secondaryActionButtonRow}>
+              <Text style={styles.secondaryButtonText}>SA Login</Text>
+            </Pressable>
+          </Link>
 
-        <Link href="/admin/login" asChild>
-          <Pressable style={styles.adminActionButton}>
-            <Text style={styles.adminButtonText}>Manager Login</Text>
-          </Pressable>
-        </Link>
+          <Link href="/admin/login" asChild>
+            <Pressable style={styles.adminActionButtonRow}>
+              <Text style={styles.adminButtonText}>Manager Login</Text>
+            </Pressable>
+          </Link>
+        </View>
       </View>
     </View>
   );
@@ -43,7 +59,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#070D1A",
-    paddingHorizontal: 20,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
     justifyContent: "center",
     overflow: "hidden",
   },
@@ -52,13 +69,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.22)",
     borderRadius: 24,
-    padding: 24,
+    paddingVertical: 18,
+    paddingHorizontal: 10,
     gap: 14,
     shadowColor: "#000000",
     shadowOpacity: 0.28,
     shadowRadius: 22,
     shadowOffset: { width: 0, height: 14 },
     elevation: 10,
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
+    alignItems: "center",
   },
   eyebrow: {
     color: "#B7CBFF",
@@ -66,12 +88,15 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
     textTransform: "uppercase",
     fontWeight: "700",
+    textAlign: "center",
   },
   title: {
     fontSize: 30,
     lineHeight: 34,
     color: "#F6FAFF",
     fontWeight: "800",
+    marginBottom: 8,
+    textAlign: "center",
   },
   subtitle: {
     color: "#D1DCF4",
@@ -88,51 +113,66 @@ const styles = StyleSheet.create({
   primaryButton: {
     backgroundColor: "#F26419",
   },
-  primaryActionButton: {
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.24)",
-  },
   primaryButtonText: {
     color: "#FFF6F2",
     fontWeight: "700",
     fontSize: 15,
+    textAlign: "center",
   },
   secondaryButton: {
     backgroundColor: "#10213B",
-  },
-  secondaryActionButton: {
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    backgroundColor: "rgba(132, 158, 255, 0.2)",
-    borderWidth: 1,
-    borderColor: "rgba(196, 210, 255, 0.32)",
   },
   secondaryButtonText: {
     color: "#EAF2FF",
     fontWeight: "700",
     fontSize: 15,
-  },
-  adminActionButton: {
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    backgroundColor: "rgba(124, 255, 186, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(124, 255, 186, 0.22)",
-    marginTop: 8,
+    textAlign: "center",
   },
   adminButtonText: {
     color: "#E8FFF0",
     fontWeight: "700",
     fontSize: 15,
+    textAlign: "center",
+  },
+  buttonRow: {
+    flexDirection: "row",
+    width: "100%",
+    justifyContent: "space-between",
+    alignItems: "stretch",
+    gap: 8,
+  },
+  primaryActionButtonRow: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.24)",
+    flex: 1,
+  },
+  secondaryActionButtonRow: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(132, 158, 255, 0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(196, 210, 255, 0.32)",
+    flex: 1,
+  },
+  adminActionButtonRow: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(124, 255, 186, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(124, 255, 186, 0.22)",
+    flex: 1,
   },
   bgCircleOne: {
     position: "absolute",

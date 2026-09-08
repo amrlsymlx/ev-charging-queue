@@ -77,6 +77,20 @@ export default function CustomerTrackScreen() {
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </View>
+
+      <Pressable
+        style={{ alignItems: "center", marginTop: 10 }}
+        onPress={() => router.push("/")}
+      >
+        <Text style={styles.linkText}>Back to main page</Text>
+      </Pressable>
+
+      <Pressable
+        style={{ alignItems: "center", marginTop: 10 }}
+        onPress={() => router.push("/customer/join")}
+      >
+        <Text style={styles.linkText}>Join Queue</Text>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -136,6 +150,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   formatted: { color: "#C4D3EE", marginTop: 8, fontSize: 13 },
+  linkText: { color: "#C4D2FF", textAlign: "center" },
   bgGlowOne: {
     position: "absolute",
     width: 260,

@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
     Pressable,
     SafeAreaView,
@@ -10,8 +10,11 @@ import {
 
 import { useQueue } from "@/context/QueueContext";
 import { formatMinutes, getRemainingMinutes } from "@/lib/eta";
+import { supabase } from "@/lib/supabase";
+import { Ionicons } from "@expo/vector-icons";
 
 export default function SADashboardScreen() {
+  const router = useRouter();
   const { saName = "SA" } = useLocalSearchParams<{
     saName?: string;
     role?: string;
@@ -43,7 +46,23 @@ export default function SADashboardScreen() {
       <View style={styles.bgGlowOne} />
       <View style={styles.bgGlowTwo} />
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.heading}>Dashboard</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.heading}>Dashboard</Text>
+          <Pressable
+            onPress={async () => {
+              try {
+                await supabase.auth.signOut();
+              } catch {
+                // ignore
+              }
+              router.replace("/sa/login");
+            }}
+            style={styles.logoutButton}
+            accessibilityLabel="Logout"
+          >
+            <Ionicons name="log-out" size={20} color="#F4F8FF" />
+          </Pressable>
+        </View>
         <Text style={styles.subheading}>
           Welcome, {saName}. Live queue and bay control.
         </Text>
@@ -209,6 +228,12 @@ export default function SADashboardScreen() {
             </View>
           ))}
         </View>
+        <Pressable
+          style={{ alignItems: "center", marginTop: 12 }}
+          onPress={() => router.push("/")}
+        >
+          <Text style={styles.linkText}>Back to main page</Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -233,6 +258,13 @@ const styles = StyleSheet.create({
     color: "#C4D3EE",
     marginBottom: 4,
   },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  logoutButton: { padding: 8 },
+  linkText: { color: "#C4D2FF", textAlign: "center", marginTop: 6 },
   sectionCard: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 1,

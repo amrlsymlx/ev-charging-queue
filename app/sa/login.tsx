@@ -1,16 +1,22 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
     SafeAreaView,
     StyleSheet,
+    Switch,
     Text,
     TextInput,
     View,
 } from "react-native";
 
+import {
+    deleteSecureItem,
+    getSecureItem,
+    setSecureItem,
+} from "@/lib/secureStorage";
 import { supabase } from "@/lib/supabase";
 
 export default function SALoginScreen() {
@@ -21,6 +27,7 @@ export default function SALoginScreen() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
 
   const onLogin = async () => {
     const rawId = email.trim().toLowerCase();
@@ -84,6 +91,21 @@ export default function SALoginScreen() {
     }
 
     const saName = saAccount.name || "SA";
+    // persist credentials if requested
+    try {
+      const KEY = "sa_credentials";
+      if (rememberMe) {
+        await setSecureItem(
+          KEY,
+          JSON.stringify({ email: normalizedEmail, password }),
+        );
+      } else {
+        await deleteSecureItem(KEY);
+      }
+    } catch (e) {
+      // ignore storage errors
+    }
+
     setPassword("");
     setLoading(false);
 
@@ -93,15 +115,29 @@ export default function SALoginScreen() {
     });
   };
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const KEY = "sa_credentials";
+        const raw = await getSecureItem(KEY);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          setEmail(obj.email || "");
+          setPassword(obj.password || "");
+          setRememberMe(true);
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.bgGlowOne} />
       <View style={styles.bgGlowTwo} />
       <View style={styles.card}>
-        <Text style={styles.title}>Service Advisor Login</Text>
-        <Text style={styles.subtitle}>
-          Use manager-created SA credentials to access dashboard controls.
-        </Text>
+        <Text style={[styles.title, styles.titleCentered]}>SA Login</Text>
 
         <TextInput
           style={styles.input}
@@ -133,16 +169,33 @@ export default function SALoginScreen() {
           </Pressable>
         </View>
 
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            marginVertical: 8,
+          }}
+        >
+          <Switch value={rememberMe} onValueChange={setRememberMe} />
+          <Text style={{ color: "#D1DCF3", marginLeft: 8 }}>Remember me</Text>
+        </View>
+
         <Pressable style={styles.button} onPress={onLogin} disabled={loading}>
           {loading ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text style={styles.buttonText}>Login to Dashboard</Text>
+            <Text style={styles.buttonText}>Login</Text>
           )}
         </Pressable>
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </View>
+      <Pressable
+        style={{ alignItems: "center", marginTop: 12 }}
+        onPress={() => router.push("/")}
+      >
+        <Text style={styles.linkText}>Back to main page</Text>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -152,7 +205,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#070D1A",
     justifyContent: "center",
-    padding: 18,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
   },
   card: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
@@ -166,12 +220,17 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
     elevation: 8,
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
   },
   title: {
     fontSize: 25,
     color: "#F6FAFF",
     fontWeight: "800",
+    marginBottom: 8,
   },
+  titleCentered: { textAlign: "center", width: "100%" },
   subtitle: {
     color: "#D1DCF3",
     lineHeight: 20,
@@ -218,6 +277,7 @@ const styles = StyleSheet.create({
     color: "#FFD0A8",
     fontWeight: "600",
   },
+  linkText: { color: "#C4D2FF", textAlign: "center", marginTop: 6 },
   bgGlowOne: {
     position: "absolute",
     width: 260,

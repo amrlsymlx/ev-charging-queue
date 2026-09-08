@@ -119,8 +119,8 @@ export default function AdminLoginScreen() {
     setLoading(false);
     setMessage(
       needsEmailConfirmation
-        ? "Manager account created. Confirm email in inbox, then login."
-        : "Manager account created in Supabase. You can login now.",
+        ? "Manager account created. Confirm email in inbox, then Login."
+        : "Manager account created in Supabase. You can Login now.",
     );
   };
 
@@ -145,13 +145,10 @@ export default function AdminLoginScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.title}>Manager Login</Text>
-        <Text style={styles.subtitle}>
-          Managers must login to view reports and records.
-        </Text>
+        <Text style={[styles.title, styles.titleCentered]}>Manager Login</Text>
 
         <TextInput
-          style={styles.input}
+          style={[styles.input, styles.fieldSpacing]}
           value={email}
           onChangeText={setEmail}
           placeholder="Manager Email"
@@ -160,7 +157,7 @@ export default function AdminLoginScreen() {
           keyboardType="email-address"
         />
 
-        <View style={styles.inputRow}>
+        <View style={[styles.inputRow, styles.fieldSpacing]}>
           <TextInput
             style={styles.inputFlex}
             value={password}
@@ -183,11 +180,13 @@ export default function AdminLoginScreen() {
         </View>
 
         <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            marginVertical: 8,
-          }}
+          style={[
+            {
+              flexDirection: "row",
+              alignItems: "center",
+            },
+            styles.fieldSpacing,
+          ]}
         >
           <Switch value={rememberMe} onValueChange={setRememberMe} />
           <Text style={{ color: "#D1DCF3", marginLeft: 8 }}>Remember me</Text>
@@ -197,20 +196,19 @@ export default function AdminLoginScreen() {
           {loading ? (
             <ActivityIndicator color="#FFF6F2" />
           ) : (
-            <Text style={styles.buttonText}>Login as Manager</Text>
+            <Text style={styles.buttonText}>Login</Text>
           )}
-        </Pressable>
-
-        <Pressable
-          style={styles.secondaryButton}
-          onPress={onCreateManagerAccount}
-          disabled={loading}
-        >
-          <Text style={styles.secondaryButtonText}>Create Manager Account</Text>
         </Pressable>
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </View>
+
+      <Pressable
+        style={{ alignItems: "center", marginTop: 12 }}
+        onPress={() => router.push("/")}
+      >
+        <Text style={styles.linkText}>Back to main page</Text>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -220,15 +218,26 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#070D1A",
     justifyContent: "center",
-    padding: 18,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
   },
   card: {
     backgroundColor: "rgba(255,255,255,0.08)",
     borderRadius: 14,
     padding: 16,
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
   },
-  title: { fontSize: 22, color: "#F6FAFF", fontWeight: "800" },
+  title: {
+    fontSize: 22,
+    color: "#F6FAFF",
+    fontWeight: "800",
+    marginBottom: 8,
+  },
   subtitle: { color: "#D1DCF3", marginBottom: 8 },
+  titleCentered: { textAlign: "center" },
+  fieldSpacing: { marginBottom: 12 },
   input: {
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.22)",
@@ -274,4 +283,5 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: "#DDE8FF", fontWeight: "700" },
   message: { color: "#FFD0A8", marginTop: 8 },
+  linkText: { color: "#C4D2FF", textAlign: "center" },
 });
