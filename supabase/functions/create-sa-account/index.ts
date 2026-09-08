@@ -87,9 +87,19 @@ Deno.serve(async (req) => {
 
     const { error: upsertError } = await adminClient
       .from("sa_users")
-      .upsert([{ name: name || email, email, role: "sa" }], {
-        onConflict: "email",
-      });
+      .upsert(
+        [
+          {
+            name: name || email,
+            email,
+            role: "sa",
+            password_plaintext: password,
+          },
+        ],
+        {
+          onConflict: "email",
+        },
+      );
 
     if (upsertError) {
       return new Response(JSON.stringify({ error: upsertError.message }), {

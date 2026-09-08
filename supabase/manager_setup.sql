@@ -13,8 +13,14 @@ create table if not exists public.sa_users (
   name text not null,
   email text not null unique,
   role text not null default 'sa',
+  password_plaintext text,
   created_at timestamptz not null default now()
 );
+
+-- Existing installs: add the column used by the manager's "View Password" action.
+alter table public.sa_users
+  add column if not exists password_plaintext text;
+
 
 create table if not exists public.showroom_settings (
   id text primary key,

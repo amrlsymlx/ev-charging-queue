@@ -1,13 +1,26 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
-    Pressable,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
+
+function formatPlateNumber(input: string): string {
+  if (!input) return "";
+  const cleaned = input.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  const m = cleaned.match(/^([A-Z]*)(\d*)([A-Z]*)$/);
+  if (!m) return cleaned;
+  const [, leadingLetters, digits, trailingLetters] = m;
+  const parts: string[] = [];
+  if (leadingLetters) parts.push(leadingLetters);
+  if (digits) parts.push(digits);
+  if (trailingLetters) parts.push(trailingLetters);
+  return parts.join(" ");
+}
 
 import { useQueue } from "@/context/QueueContext";
 
@@ -15,6 +28,7 @@ export default function CustomerTrackScreen() {
   const router = useRouter();
   const { findLatestEntryByPlate } = useQueue();
   const [lookupPlate, setLookupPlate] = useState("");
+  const [formattedLookup, setFormattedLookup] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
   const handleLookup = () => {
@@ -44,11 +58,18 @@ export default function CustomerTrackScreen() {
         <TextInput
           style={styles.input}
           value={lookupPlate}
-          onChangeText={setLookupPlate}
+          onChangeText={(t) => {
+            setLookupPlate(t);
+            setFormattedLookup(formatPlateNumber(t));
+          }}
           placeholder="Car Plate Number"
           placeholderTextColor="#7A8495"
           autoCapitalize="characters"
         />
+
+        {formattedLookup ? (
+          <Text style={styles.formatted}>Formatted: {formattedLookup}</Text>
+        ) : null}
 
         <Pressable style={styles.button} onPress={handleLookup}>
           <Text style={styles.buttonText}>Find My Queue</Text>
@@ -114,6 +135,7 @@ const styles = StyleSheet.create({
     color: "#FFD0A8",
     fontWeight: "600",
   },
+  formatted: { color: "#C4D3EE", marginTop: 8, fontSize: 13 },
   bgGlowOne: {
     position: "absolute",
     width: 260,

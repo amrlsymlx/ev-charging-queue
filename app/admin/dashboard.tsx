@@ -1,111 +1,89 @@
 import { useQueue } from "@/context/QueueContext";
-import { formatMinutes } from "@/lib/eta";
-import { supabase } from "@/lib/supabase";
+import { promptForInput, showAlert } from "@/lib/alert";
+import { SUPABASE_URL, supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useRouter } from "expo-router";
+import React, { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View
+    ActivityIndicator,
+    Modal,
+    Platform,
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 
 type SAAccount = {
   id: string;
   name: string;
   email: string;
-  role: string;
-  created_at?: string;
+  password_plaintext?: string | null;
 };
 
 export default function AdminDashboard() {
-  const { adminEmail = "Manager" } = useLocalSearchParams<{
-    adminEmail?: string;
-  }>();
+  const router = useRouter();
   const { chargingSessions, bays } = useQueue();
 
   const [saAccounts, setSaAccounts] = useState<SAAccount[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
-  const [savingAccount, setSavingAccount] = useState(false);
-  const router = useRouter();
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [isManagerSession, setIsManagerSession] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [tab, setTab] = useState<"stats" | "home" | "settings">("home");
+  const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [modalAccount, setModalAccount] = useState<SAAccount | null>(null);
+  const [modalMessage, setModalMessage] = useState<string | null>(null);
 
   const [showroomName, setShowroomName] = useState("Main Showroom");
   const [showroomLat, setShowroomLat] = useState("");
   const [showroomLng, setShowroomLng] = useState("");
   const [gpsRadiusM, setGpsRadiusM] = useState("50");
-  const [savingShowroom, setSavingShowroom] = useState(false);
+  const [loadingShowroom, setLoadingShowroom] = useState(false);
 
-  const [checkingAuth, setCheckingAuth] = useState(true);
-  const [isManagerSession, setIsManagerSession] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [tab, setTab] = useState<"stats" | "home" | "settings">("home");
-
-  const totalSessions = chargingSessions.length;
-  const completed = chargingSessions.filter(
-    (s) => s.status === "completed",
-  ).length;
-  const active = chargingSessions.filter((s) => s.status === "active").length;
-
-  const utilization = bays.map((bay) => {
-    const count = chargingSessions.filter((s) => s.bayId === bay.id).length;
-    return { bayId: bay.id, name: bay.name, count };
-  });
-
-  const isManagerUser = (user: any) => {
-    const role = user?.app_metadata?.role || user?.user_metadata?.role;
-    return role === "manager" || role === "admin";
-  };
-
-  const verifyManagerSession = async () => {
-    setCheckingAuth(true);
-    try {
-      const { data, error } = await supabase.auth.getUser();
-      if (error || !data?.user) {
+  useEffect(() => {
+    const verify = async () => {
+      setCheckingAuth(true);
+      try {
+        const { data } = await supabase.auth.getUser();
+        const user = data?.user;
+        const role = user?.app_metadata?.role || user?.user_metadata?.role;
+        setIsManagerSession(role === "manager" || role === "admin");
+      } catch {
         setIsManagerSession(false);
-      } else {
-        setIsManagerSession(isManagerUser(data.user));
+      } finally {
+        setCheckingAuth(false);
       }
-    } catch (err) {
-      setIsManagerSession(false);
-    } finally {
-      setCheckingAuth(false);
-    }
-  };
+    };
+    verify();
+    loadAccounts();
+    loadShowroom();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadAccounts = async () => {
     setLoadingAccounts(true);
     const { data, error } = await supabase
       .from("sa_users")
-      .select("id, name, email, role, created_at")
-      .in("role", ["sa", "admin"])
+      .select("id, name, email, password_plaintext")
       .order("created_at", { ascending: false });
-
-    if (error) {
-      setMessage(error.message);
-      setLoadingAccounts(false);
-      return;
-    }
-
+    if (error) setMessage(error.message);
     setSaAccounts((data as SAAccount[]) || []);
     setLoadingAccounts(false);
   };
 
   const loadShowroom = async () => {
+    setLoadingShowroom(true);
     const { data, error } = await supabase
       .from("showroom_settings")
       .select("showroom_name, latitude, longitude, gps_radius_m")
       .eq("id", "main")
       .maybeSingle();
 
-    if (error) {
-      setMessage(error.message);
-      return;
-    }
+    if (error) setMessage(error.message);
 
     if (data) {
       setShowroomName(data.showroom_name || "Main Showroom");
@@ -113,88 +91,87 @@ export default function AdminDashboard() {
       setShowroomLng(String(data.longitude ?? ""));
       setGpsRadiusM(String(data.gps_radius_m ?? 50));
     }
+    setLoadingShowroom(false);
   };
 
-  useEffect(() => {
-    verifyManagerSession();
-    loadAccounts();
-    loadShowroom();
-  }, []);
-
-  // creation moved to dedicated settings pages
-
   const onDeleteSAAccount = async (emailOrId: string) => {
-    Alert.alert("Delete SA", "Delete selected SA account?", [
+    if (checkingAuth) {
+      showAlert("Please wait", "Checking authorization. Try again shortly.");
+      return;
+    }
+    if (!isManagerSession) {
+      showAlert(
+        "Not authorized",
+        "You must be signed in as a manager to delete SA accounts.",
+        [
+          { text: "OK", style: "cancel" },
+          { text: "Sign in", onPress: () => router.push("/admin/login") },
+        ],
+      );
+      return;
+    }
+
+    showAlert("Delete SA", "Delete selected SA account?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
-          setSavingAccount(true);
           try {
-            // try RPC first (if configured)
             const email = emailOrId.includes("@")
               ? emailOrId
               : `${emailOrId}@sa.internal`;
-            const { error: rpcErr } = await supabase.rpc("delete_sa_account", {
-              sa_email: email,
-            });
-            if (rpcErr) {
-              // fallback: remove from sa_users table
-              const { error } = await supabase
-                .from("sa_users")
-                .delete()
-                .eq("email", email);
-              if (error) throw error;
-            }
-
+            const { error } = await supabase
+              .from("sa_users")
+              .delete()
+              .eq("email", email);
+            if (error) throw error;
             setMessage("SA account deleted.");
             await loadAccounts();
           } catch (err: any) {
             setMessage(err?.message || "Failed to delete SA account.");
-          } finally {
-            setSavingAccount(false);
           }
         },
       },
     ]);
   };
 
-  // showroom editing moved to dedicated settings page
+  const totalSessions = chargingSessions.length;
+  const completed = chargingSessions.filter(
+    (s) => s.status === "completed",
+  ).length;
+  const active = chargingSessions.filter((s) => s.status === "active").length;
+  const utilization = bays.map((bay) => ({
+    bayId: bay.id,
+    name: bay.name,
+    count: chargingSessions.filter((s) => s.bayId === bay.id).length,
+  }));
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.heading}>Manager Dashboard</Text>
-        <Text style={styles.subheading}>Welcome, {adminEmail}.</Text>
       </View>
 
       {checkingAuth ? <ActivityIndicator color="#D1DCF3" /> : null}
 
       <ScrollView contentContainerStyle={styles.content}>
         {tab === "stats" && (
-          <>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>History (latest 12)</Text>
-              {chargingSessions
-                .slice()
-                .reverse()
-                .slice(0, 12)
-                .map((s) => (
-                  <View key={s.id} style={styles.rowWrap}>
-                    <Text style={styles.row}>
-                      {s.saName} — {s.bayId}
-                    </Text>
-                    <Text style={styles.row}>
-                      {s.status}{" "}
-                      {s.startedAt
-                        ? `• ${formatMinutes(s.plannedDurationMinutes)}`
-                        : ""}
-                    </Text>
-                  </View>
-                ))}
-            </View>
-          </>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>History (latest 12)</Text>
+            {chargingSessions
+              .slice()
+              .reverse()
+              .slice(0, 12)
+              .map((s) => (
+                <View key={s.id} style={styles.rowWrap}>
+                  <Text style={styles.row}>
+                    {s.saName} — {s.bayId}
+                  </Text>
+                  <Text style={styles.row}>{s.status}</Text>
+                </View>
+              ))}
+          </View>
         )}
 
         {tab === "home" && (
@@ -222,47 +199,198 @@ export default function AdminDashboard() {
           <>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>SA Account Management</Text>
+
+              <Text style={styles.listHeading}>Active SA Accounts</Text>
+              <View style={styles.listWrapper}>
+                {loadingAccounts ? (
+                  <ActivityIndicator color="#D1DCF3" />
+                ) : saAccounts.length === 0 ? (
+                  <Text style={styles.row}>No SA accounts found.</Text>
+                ) : (
+                  saAccounts.map((account, idx) => {
+                    const isLast = idx === saAccounts.length - 1;
+                    const saId = (
+                      account.email ||
+                      account.name ||
+                      account.id
+                    ).split("@")[0];
+                    return (
+                      <View
+                        key={account.id}
+                        style={[
+                          styles.accountRow,
+                          styles.rowWrap,
+                          !isLast && styles.accountDivider,
+                        ]}
+                      >
+                        <View>
+                          <Text style={styles.accountName}>
+                            SA ID:{" "}
+                            <Text style={styles.accountEmail}>{saId}</Text>
+                          </Text>
+                        </View>
+                        <View
+                          style={{ flexDirection: "row", alignItems: "center" }}
+                        >
+                          <Pressable
+                            onPress={() =>
+                              setOpenMenuFor(
+                                openMenuFor === account.id ? null : account.id,
+                              )
+                            }
+                            style={{ padding: 8 }}
+                            accessibilityLabel="More actions"
+                          >
+                            <Ionicons
+                              name="ellipsis-vertical"
+                              size={20}
+                              color="#F8FBFF"
+                            />
+                          </Pressable>
+
+                          {openMenuFor === account.id ? (
+                            <View style={styles.menu}>
+                              <Pressable
+                                style={styles.menuItem}
+                                onPress={() => {
+                                  setOpenMenuFor(null);
+                                  setModalAccount(account);
+                                  setShowPasswordModal(true);
+                                }}
+                              >
+                                <Text style={styles.menuText}>
+                                  View Password
+                                </Text>
+                              </Pressable>
+
+                              <Pressable
+                                style={styles.menuItem}
+                                onPress={async () => {
+                                  setOpenMenuFor(null);
+                                  const newPass = await promptForInput(
+                                    `Reset password for ${account.email}`,
+                                    "Enter new password",
+                                  );
+                                  if (!newPass) return;
+
+                                  try {
+                                    const {
+                                      data: { session },
+                                    } = await supabase.auth.getSession();
+
+                                    if (!session?.access_token) {
+                                      setMessage(
+                                        "Manager session missing. Please login again.",
+                                      );
+                                      return;
+                                    }
+
+                                    const payload = {
+                                      email: account.email,
+                                      password: newPass,
+                                    };
+
+                                    const res = await supabase.functions.invoke(
+                                      "reset-sa-password",
+                                      {
+                                        body: payload,
+                                        headers: {
+                                          Authorization: `Bearer ${session.access_token}`,
+                                        },
+                                      },
+                                    );
+
+                                    if (res.error) {
+                                      const host = new URL(SUPABASE_URL).host;
+                                      const projectRef = host.split(".")[0];
+                                      const fnUrl = projectRef
+                                        ? `https://${projectRef}.functions.supabase.co/reset-sa-password`
+                                        : null;
+                                      if (!fnUrl)
+                                        throw new Error(
+                                          res.error.message ||
+                                            "Function invoke failed",
+                                        );
+
+                                      const fallback = await fetch(fnUrl, {
+                                        method: "POST",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                          Authorization: `Bearer ${session.access_token}`,
+                                        },
+                                        body: JSON.stringify(payload),
+                                      });
+
+                                      if (!fallback.ok) {
+                                        const txt = await fallback.text();
+                                        throw new Error(
+                                          `HTTP ${fallback.status}: ${txt}`,
+                                        );
+                                      }
+                                    }
+
+                                    setMessage("Password reset.");
+                                    await loadAccounts();
+                                  } catch (err: any) {
+                                    setMessage(
+                                      err?.message ||
+                                        "Failed to reset password. Ensure reset function is deployed.",
+                                    );
+                                  }
+                                }}
+                              >
+                                <Text style={styles.menuText}>
+                                  Reset Password
+                                </Text>
+                              </Pressable>
+
+                              <Pressable
+                                style={styles.menuItem}
+                                onPress={() => {
+                                  setOpenMenuFor(null);
+                                  onDeleteSAAccount(account.email);
+                                }}
+                              >
+                                <Text
+                                  style={[
+                                    styles.menuText,
+                                    { color: "#FFB3A0" },
+                                  ]}
+                                >
+                                  Delete Account
+                                </Text>
+                              </Pressable>
+                            </View>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+
               <Pressable
-                style={styles.primaryButton}
+                style={[styles.primaryButton, { marginTop: 12 }]}
                 onPress={() => router.push("/admin/settings/create-sa")}
                 disabled={checkingAuth || !isManagerSession}
               >
                 <Text style={styles.buttonText}>Create SA Account</Text>
               </Pressable>
-
-              <Text style={styles.listHeading}>Active SA Accounts</Text>
-              {loadingAccounts ? (
-                <ActivityIndicator color="#D1DCF3" />
-              ) : saAccounts.length === 0 ? (
-                <Text style={styles.row}>No SA accounts found.</Text>
-              ) : (
-                saAccounts.map((account) => (
-                  <View key={account.id} style={styles.rowWrap}>
-                    <View>
-                      <Text style={styles.row}>{account.name}</Text>
-                      <Text style={styles.rowMuted}>{account.email}</Text>
-                    </View>
-                    <Pressable
-                      style={styles.deleteButton}
-                      onPress={() => onDeleteSAAccount(account.email)}
-                      disabled={
-                        savingAccount || checkingAuth || !isManagerSession
-                      }
-                    >
-                      <Text style={styles.buttonText}>Delete</Text>
-                    </Pressable>
-                  </View>
-                ))
-              )}
             </View>
 
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Showroom Settings</Text>
-              <Text style={styles.row}>Name: {showroomName}</Text>
-              <Text style={styles.rowMuted}>
-                Lat: {showroomLat || "—"} • Lng: {showroomLng || "—"}
-              </Text>
-              <Text style={styles.rowMuted}>Radius: {gpsRadiusM} m</Text>
+              {loadingShowroom ? (
+                <ActivityIndicator color="#D1DCF3" />
+              ) : (
+                <>
+                  <Text style={styles.row}>Name: {showroomName}</Text>
+                  <Text style={styles.rowMuted}>
+                    Lat: {showroomLat || "—"} • Lng: {showroomLng || "—"}
+                  </Text>
+                  <Text style={styles.rowMuted}>Radius: {gpsRadiusM} m</Text>
+                </>
+              )}
 
               <Pressable
                 style={styles.primaryButton}
@@ -277,6 +405,116 @@ export default function AdminDashboard() {
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
+
+      <Modal
+        visible={showPasswordModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowPasswordModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>SA Credentials</Text>
+            <Text style={styles.modalLine} selectable>
+              <Text style={styles.modalLabelInline}>SA ID: </Text>
+              <Text style={styles.modalValueInline}>
+                {modalAccount ? modalAccount.email.split("@")[0] : "—"}
+              </Text>
+            </Text>
+
+            <Text style={styles.modalLine} selectable>
+              <Text style={styles.modalLabelInline}>Password: </Text>
+              <Text style={styles.modalValueInline}>
+                {modalAccount?.password_plaintext ||
+                  "Not available — use Reset Password."}
+              </Text>
+            </Text>
+
+            <View style={{ flexDirection: "row", marginTop: 18 }}>
+              <Pressable
+                style={[
+                  styles.primaryButton,
+                  {
+                    flex: 1,
+                    marginRight: 8,
+                    paddingVertical: 8,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  },
+                ]}
+                accessibilityLabel="Copy credentials"
+                onPress={async () => {
+                  const saId = modalAccount?.email.split("@")[0] ?? "";
+                  const pw = modalAccount?.password_plaintext ?? "";
+                  const textToCopy =
+                    saId || pw ? `SA ID: ${saId}\nPassword: ${pw}` : "";
+
+                  try {
+                    if (
+                      typeof navigator !== "undefined" &&
+                      (navigator as any).clipboard?.writeText
+                    ) {
+                      await (navigator as any).clipboard.writeText(textToCopy);
+                      setModalMessage("Credentials copied to clipboard.");
+                    } else if (Platform.OS !== "web") {
+                      // On native, try using the legacy clipboard API if available
+                      // This may be a no-op if no clipboard module is installed.
+                      try {
+                        // @ts-ignore
+                        const { Clipboard } = require("react-native");
+                        // @ts-ignore
+                        Clipboard.setString && Clipboard.setString(textToCopy);
+                        setModalMessage("Credentials copied to clipboard.");
+                      } catch {
+                        setModalMessage("Copy not available on this platform.");
+                      }
+                    } else {
+                      // Fallback for older browsers
+                      const el = document.createElement("textarea");
+                      el.value = textToCopy;
+                      document.body.appendChild(el);
+                      el.select();
+                      document.execCommand("copy");
+                      document.body.removeChild(el);
+                      setModalMessage("Credentials copied to clipboard.");
+                    }
+                  } catch (err) {
+                    setModalMessage("Failed to copy credentials.");
+                  }
+                }}
+              >
+                <Ionicons name="copy" size={18} color="#F8FBFF" />
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.primaryButton,
+                  {
+                    backgroundColor: "transparent",
+                    borderWidth: 1,
+                    borderColor: "rgba(196,210,255,0.32)",
+                    flex: 1,
+                  },
+                ]}
+                onPress={() => {
+                  setShowPasswordModal(false);
+                  setModalAccount(null);
+                  setModalMessage(null);
+                }}
+              >
+                <Text style={[styles.buttonText, { color: "#C4D2FF" }]}>
+                  Close
+                </Text>
+              </Pressable>
+            </View>
+            {modalMessage ? (
+              <Text style={[styles.message, { marginTop: 12 }]}>
+                {modalMessage}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.tabBar}>
         <Pressable onPress={() => setTab("stats")} style={styles.tabButton}>
@@ -310,14 +548,18 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   content: { padding: 16, paddingBottom: 96 },
   heading: { fontSize: 20, color: "#F6FAFF", fontWeight: "700" },
-  subheading: { color: "#9FB0CD", marginTop: 4 },
   card: {
     backgroundColor: "rgba(255,255,255,0.08)",
     borderRadius: 12,
     padding: 12,
     marginBottom: 12,
   },
-  cardTitle: { color: "#F6FAFF", fontWeight: "700", marginBottom: 6 },
+  cardTitle: {
+    color: "#F6FAFF",
+    fontWeight: "700",
+    marginBottom: 6,
+    textAlign: "center",
+  },
   row: { color: "#D1DCF3" },
   rowMuted: { color: "#9FB0CD" },
   rowWrap: {
@@ -325,16 +567,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 6,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.22)",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 9,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    color: "#F4F8FF",
-    marginBottom: 8,
   },
   primaryButton: {
     backgroundColor: "rgba(132, 158, 255, 0.2)",
@@ -345,14 +577,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginTop: 4,
     marginBottom: 10,
-  },
-  deleteButton: {
-    backgroundColor: "rgba(242,100,25,0.24)",
-    borderWidth: 1,
-    borderColor: "rgba(255,208,168,0.34)",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
   },
   buttonText: { color: "#F8FBFF", fontWeight: "700" },
   listHeading: { color: "#E0EBFF", fontWeight: "700", marginBottom: 8 },
@@ -376,4 +600,55 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.03)",
   },
+  menu: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginLeft: 8,
+    minWidth: 140,
+  },
+  menuItem: { paddingVertical: 8 },
+  menuText: { color: "#F6FAFF" },
+  accountRow: {
+    paddingVertical: 10,
+  },
+  accountDivider: {
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.08)",
+  },
+  accountName: { color: "#F4F8FF", fontWeight: "600" },
+  accountEmail: { color: "#B9CBE6" },
+  listWrapper: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContainer: {
+    width: "86%",
+    maxWidth: 480,
+    backgroundColor: "rgba(12,16,26,0.98)",
+    borderRadius: 12,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
+  modalTitle: {
+    color: "#F6FAFF",
+    fontWeight: "700",
+    fontSize: 16,
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  modalLabel: { color: "#CFE0FF", fontWeight: "600", marginTop: 8 },
+  modalValue: { color: "#EAF2FF", fontSize: 15, marginTop: 4 },
+  modalLine: { flexDirection: "row", alignItems: "center", marginTop: 8 },
+  modalLabelInline: { color: "#CFE0FF", fontWeight: "700" },
+  modalValueInline: { color: "#EAF2FF", fontSize: 15 },
 });

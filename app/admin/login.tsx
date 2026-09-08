@@ -1,16 +1,22 @@
+import {
+  deleteSecureItem,
+  getSecureItem,
+  setSecureItem,
+} from "@/lib/secureStorage";
 import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import type { User } from "@supabase/supabase-js";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Pressable,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 export default function AdminLoginScreen() {
@@ -18,6 +24,7 @@ export default function AdminLoginScreen() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -62,6 +69,19 @@ export default function AdminLoginScreen() {
 
     setPassword("");
     setLoading(false);
+    try {
+      const KEY = "manager_credentials";
+      if (rememberMe) {
+        await setSecureItem(
+          KEY,
+          JSON.stringify({ email: normalizedEmail, password }),
+        );
+      } else {
+        await deleteSecureItem(KEY);
+      }
+    } catch (e) {
+      // ignore storage errors
+    }
     router.replace({
       pathname: "/admin/dashboard",
       params: { adminEmail: data.user.email ?? normalizedEmail },
@@ -104,6 +124,24 @@ export default function AdminLoginScreen() {
     );
   };
 
+  useEffect(() => {
+    // load saved credentials on client only
+    (async () => {
+      try {
+        const KEY = "manager_credentials";
+        const raw = await getSecureItem(KEY);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          setEmail(obj.email || "");
+          setPassword(obj.password || "");
+          setRememberMe(true);
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, []);
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.card}>
@@ -142,6 +180,17 @@ export default function AdminLoginScreen() {
               color="#9FB0CD"
             />
           </Pressable>
+        </View>
+
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            marginVertical: 8,
+          }}
+        >
+          <Switch value={rememberMe} onValueChange={setRememberMe} />
+          <Text style={{ color: "#D1DCF3", marginLeft: 8 }}>Remember me</Text>
         </View>
 
         <Pressable style={styles.button} onPress={onLogin} disabled={loading}>
