@@ -1,3 +1,4 @@
+import { showAlert } from "@/lib/alert";
 import { SUPABASE_URL, supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -20,6 +21,8 @@ export default function CreateSaScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
+  const idHasUppercase = /[A-Z]/.test(id);
+
   const buildFunctionUrl = (fnName: string) => {
     try {
       const host = new URL(SUPABASE_URL).host;
@@ -37,11 +40,19 @@ export default function CreateSaScreen() {
       return;
     }
 
+    if (idHasUppercase) {
+      setMessage("Letters must be lowercase.");
+      return;
+    }
+
     setSaving(true);
     setMessage(null);
 
     try {
-      const email = id.includes("@") ? id.trim() : `${id.trim()}@sa.internal`;
+      const normalizedId = id.trim().toLowerCase();
+      const email = normalizedId.includes("@")
+        ? normalizedId
+        : `${normalizedId}@sa.internal`;
       // include current session token so the function can verify caller is a manager
       const {
         data: { session },
@@ -88,11 +99,17 @@ export default function CreateSaScreen() {
         }
       }
 
-      setMessage("SA account created.");
+      showAlert(
+        "SA account creation success!",
+        `SA ID: ${normalizedId}\nPassword: ${password}`,
+      );
       setId("");
       setPassword("");
-      // navigate back to dashboard so it can refresh
-      router.replace("/admin/dashboard");
+      // navigate back to the dashboard's Settings tab so it can refresh
+      router.replace({
+        pathname: "/admin/dashboard",
+        params: { tab: "settings" },
+      });
     } catch (err: any) {
       const detail = err?.message || "Unknown error";
       setMessage(
@@ -100,89 +117,6 @@ export default function CreateSaScreen() {
       );
     } finally {
       setSaving(false);
-    }
-  };
-
-  const [checkingFn, setCheckingFn] = useState(false);
-  const [debugInfo, setDebugInfo] = useState<string | null>(null);
-  const checkFunctionConnectivity = async () => {
-    setCheckingFn(true);
-    setMessage(null);
-    setDebugInfo(null);
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!session?.access_token) {
-        setMessage("Manager session missing — Login as manager first.");
-        setCheckingFn(false);
-        return;
-      }
-
-      // Try supabase invoke first
-      const invokeRes = await supabase.functions.invoke("create-sa-account", {
-        body: {},
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-
-      if (!invokeRes.error) {
-        setMessage("Function reachable (invoke succeeded).");
-        setCheckingFn(false);
-        setDebugInfo(JSON.stringify(invokeRes, null, 2));
-        return;
-      }
-
-      // If invoke reported an error, attempt direct fetch to function URL for more details
-      const fnUrl = (() => {
-        try {
-          const host = new URL(SUPABASE_URL).host;
-          const projectRef = host.split(".")[0];
-          return projectRef
-            ? `https://${projectRef}.functions.supabase.co/create-sa-account`
-            : null;
-        } catch {
-          return null;
-        }
-      })();
-
-      if (!fnUrl) {
-        setMessage(
-          `Unable to derive function URL from SUPABASE_URL; invoke returned: ${invokeRes.error?.message || JSON.stringify(invokeRes)}`,
-        );
-        setCheckingFn(false);
-        setDebugInfo(JSON.stringify(invokeRes, null, 2));
-        return;
-      }
-
-      try {
-        const resp = await fetch(fnUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({}),
-        });
-
-        const text = await resp.text();
-        if (!resp.ok) {
-          setMessage(`Function HTTP ${resp.status}: ${text}`);
-        } else {
-          setMessage(`Function reachable (HTTP ${resp.status}): ${text}`);
-        }
-        setDebugInfo(`fetchResponse: ${resp.status}\nbody:\n${text}`);
-      } catch (fetchErr: any) {
-        setMessage(fetchErr?.message || String(fetchErr));
-        setDebugInfo(
-          JSON.stringify({ invokeRes, fetchError: String(fetchErr) }, null, 2),
-        );
-      }
-    } catch (err: any) {
-      setMessage(err?.message || String(err));
-      setDebugInfo(String(err));
-    } finally {
-      setCheckingFn(false);
     }
   };
 
@@ -200,6 +134,9 @@ export default function CreateSaScreen() {
           placeholderTextColor="#7E8EA8"
           autoCapitalize="none"
         />
+        {idHasUppercase ? (
+          <Text style={styles.errorText}>Letters must be lowercase.</Text>
+        ) : null}
 
         <View style={styles.inputRow}>
           <TextInput
@@ -223,7 +160,15 @@ export default function CreateSaScreen() {
           </Pressable>
         </View>
 
-        <Pressable style={styles.button} onPress={onCreate} disabled={saving}>
+        <Pressable
+          style={[
+            styles.button,
+            (saving || idHasUppercase || !id.trim() || !password) &&
+              styles.buttonDisabled,
+          ]}
+          onPress={onCreate}
+          disabled={saving || idHasUppercase || !id.trim() || !password}
+        >
           {saving ? (
             <ActivityIndicator color="#FFF" />
           ) : (
@@ -231,53 +176,15 @@ export default function CreateSaScreen() {
           )}
         </Pressable>
 
-        <Pressable
-          style={[
-            styles.button,
-            {
-              marginTop: 8,
-              backgroundColor: "transparent",
-              borderWidth: 0,
-              borderColor: "transparent",
-            },
-          ]}
-          onPress={checkFunctionConnectivity}
-          disabled={checkingFn}
-        >
-          {checkingFn ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.buttonText}>Check Function Connectivity</Text>
-          )}
-        </Pressable>
-
         {message ? <Text style={styles.message}>{message}</Text> : null}
-        {(() => {
-          try {
-            const host = new URL(SUPABASE_URL).host;
-            const projectRef = host.split(".")[0];
-            const fnUrl = projectRef
-              ? `https://${projectRef}.functions.supabase.co/create-sa-account`
-              : null;
-            return fnUrl ? (
-              <Text style={[styles.message, { color: "#A8D0FF" }]}>
-                Function URL: {fnUrl}
-              </Text>
-            ) : null;
-          } catch {
-            return null;
-          }
-        })()}
-
-        {debugInfo ? (
-          <View style={{ marginTop: 8 }}>
-            <Text style={[styles.message, { color: "#9FB0CD" }]}>
-              Debug info:
-            </Text>
-            <Text style={{ color: "#8EA6C9", fontSize: 12 }}>{debugInfo}</Text>
-          </View>
-        ) : null}
       </View>
+
+      <Pressable
+        style={{ alignItems: "center", marginTop: 12 }}
+        onPress={() => router.back()}
+      >
+        <Text style={styles.linkText}>Back to Settings</Text>
+      </Pressable>
     </SafeAreaView>
   );
 }
@@ -315,12 +222,22 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.04)",
   },
   eyeButton: { padding: 10 },
+  errorText: {
+    color: "#FF9B8A",
+    marginTop: -4,
+    marginBottom: 8,
+    fontSize: 12,
+  },
   button: {
     backgroundColor: "rgba(132, 158, 255, 0.2)",
     padding: 12,
     borderRadius: 8,
     alignItems: "center",
   },
+  buttonDisabled: {
+    opacity: 0.5,
+  },
   buttonText: { color: "#F8FBFF", fontWeight: "700" },
   message: { color: "#FFD0A8", marginTop: 8 },
+  linkText: { color: "#C4D2FF", textAlign: "center", marginTop: 6 },
 });

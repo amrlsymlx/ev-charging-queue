@@ -1,8 +1,24 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import {
+    Pressable,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
+} from "react-native";
 
+import PlateBadge from "@/components/PlateBadge";
 import { useQueue } from "@/context/QueueContext";
-import { formatMinutes, getRemainingMinutes } from "@/lib/eta";
+import { Ionicons } from "@expo/vector-icons";
+import {
+    formatClockTime,
+    formatCountdown,
+    getSessionEndTime,
+    getSessionProgress,
+    getWaitProgress,
+} from "@/lib/eta";
 
 export default function CustomerStatusScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -16,6 +32,13 @@ export default function CustomerStatusScreen() {
     getQueuePosition,
     getEtaForEntry,
   } = useQueue();
+
+  // Forces a re-render every second so countdowns show live seconds.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const entry = id ? getQueueEntryById(id) : undefined;
 
@@ -41,8 +64,18 @@ export default function CustomerStatusScreen() {
   const activeSessionByBay = new Map(
     activeSessions.map((session) => [session.bayId, session]),
   );
+  const mySession = activeSessions.find(
+    (session) => session.queueEntryId === entry.id,
+  );
+  const myPhase =
+    mySession?.startedAt &&
+    getSessionProgress(
+      mySession.startedAt,
+      mySession.graceMinutes,
+      mySession.chargingMinutes,
+    );
   const queuePosition = getQueuePosition(entry.id);
-  const etaMinutes = getEtaForEntry(entry.id);
+  const etaSeconds = getEtaForEntry(entry.id);
   const historicalCount = queueEntries.filter(
     (item) => item.status === "completed",
   ).length;
@@ -54,7 +87,7 @@ export default function CustomerStatusScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.heroCard}>
           <Text style={styles.heroTitle}>Hello, {entry.name}</Text>
-          <Text style={styles.heroPlate}>Plate: {entry.plateNumber}</Text>
+          <PlateBadge plateNumber={entry.plateNumber} />
           <Text style={styles.heroStatus}>
             Status: {entry.status.toUpperCase()}
           </Text>
@@ -63,10 +96,71 @@ export default function CustomerStatusScreen() {
             <>
               <Text style={styles.metricLabel}>Current Position</Text>
               <Text style={styles.metricValue}>#{queuePosition}</Text>
-              <Text style={styles.metricLabel}>Estimated Wait Time</Text>
-              <Text style={styles.metricValue}>
-                {formatMinutes(etaMinutes)}
+              <Text style={[styles.metricLabel, styles.centeredText]}>
+                ETA Start Charging | ETA Start Time:{" "}
+                {formatClockTime(new Date(Date.now() + etaSeconds * 1000))}
               </Text>
+              <Text style={styles.metricValue}>
+                {formatCountdown(etaSeconds)}
+              </Text>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    styles.progressFillEta,
+                    {
+                      width: `${Math.min(
+                        Math.max(
+                          getWaitProgress(entry.joinedAt, etaSeconds) * 100,
+                          0,
+                        ),
+                        100,
+                      )}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </>
+          ) : null}
+
+          {entry.status === "charging" && myPhase ? (
+            <>
+              <View style={styles.timerRow}>
+                {myPhase.phase === "charging" ? (
+                  <Ionicons
+                    name="hourglass-outline"
+                    size={16}
+                    color="#C8D7F0"
+                  />
+                ) : null}
+                <Text style={styles.metricLabel}>
+                  {myPhase.phase === "grace" ? "Initializing" : "Charging"}
+                  {mySession?.startedAt
+                    ? ` | Ends at: ${formatClockTime(
+                        getSessionEndTime(
+                          mySession.startedAt,
+                          mySession.plannedDurationMinutes,
+                        ),
+                      )}`
+                    : ""}
+                </Text>
+              </View>
+              <Text style={styles.metricValue}>
+                {formatCountdown(myPhase.remainingSeconds)}
+              </Text>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    myPhase.phase === "charging"
+                      ? styles.progressFillCharging
+                      : styles.progressFillGrace,
+                    {
+                      width: `${Math.min(Math.max(myPhase.progress * 100, 0), 100)}%`,
+                    },
+                  ]}
+                />
+              </View>
             </>
           ) : null}
 
@@ -100,16 +194,54 @@ export default function CustomerStatusScreen() {
                   {bay.status.toUpperCase()}
                 </Text>
                 {activeSession?.startedAt ? (
-                  <Text style={styles.rowSub}>
-                    Charging: {chargingEntry?.plateNumber ?? "Unknown"} (
-                    {formatMinutes(
-                      getRemainingMinutes(
+                  (() => {
+                    const { phase, remainingSeconds, progress } =
+                      getSessionProgress(
                         activeSession.startedAt,
-                        activeSession.plannedDurationMinutes,
-                      ),
-                    )}{" "}
-                    remaining)
-                  </Text>
+                        activeSession.graceMinutes,
+                        activeSession.chargingMinutes,
+                      );
+                    const endTime = getSessionEndTime(
+                      activeSession.startedAt,
+                      activeSession.plannedDurationMinutes,
+                    );
+                    return (
+                      <>
+                        <PlateBadge
+                          plateNumber={chargingEntry?.plateNumber ?? "Unknown"}
+                        />
+                        <View style={styles.timerRow}>
+                          {phase === "charging" ? (
+                            <Ionicons
+                              name="hourglass-outline"
+                              size={14}
+                              color="#D1DCF3"
+                            />
+                          ) : null}
+                          <Text style={styles.rowSub}>
+                            {phase === "charging"
+                              ? "Charging"
+                              : "Initializing"}
+                            : {formatCountdown(remainingSeconds)} | Ends at:{" "}
+                            {formatClockTime(endTime)}
+                          </Text>
+                        </View>
+                        <View style={styles.progressTrack}>
+                          <View
+                            style={[
+                              styles.progressFill,
+                              phase === "charging"
+                                ? styles.progressFillCharging
+                                : styles.progressFillGrace,
+                              {
+                                width: `${Math.min(Math.max(progress * 100, 0), 100)}%`,
+                              },
+                            ]}
+                          />
+                        </View>
+                      </>
+                    );
+                  })()
                 ) : (
                   <Text style={styles.rowSub}>Ready for next vehicle</Text>
                 )}
@@ -125,11 +257,12 @@ export default function CustomerStatusScreen() {
           ) : null}
           {waitingEntries.map((item, index) => (
             <View key={item.id} style={styles.queueRow}>
-              <Text style={styles.queueText}>
-                #{index + 1} {item.plateNumber}
-              </Text>
+              <View style={styles.queueRowLeft}>
+                <Text style={styles.queueText}>#{index + 1}</Text>
+                <PlateBadge plateNumber={item.plateNumber} />
+              </View>
               <Text style={styles.queueEta}>
-                {formatMinutes(Math.ceil((index + 1) / 2) * 65)}
+                {formatCountdown(getEtaForEntry(item.id))}
               </Text>
             </View>
           ))}
@@ -144,6 +277,13 @@ export default function CustomerStatusScreen() {
             Realtime updates refresh whenever SA actions happen.
           </Text>
         </View>
+
+        <Pressable
+          style={{ alignItems: "center", marginTop: 8 }}
+          onPress={() => router.push("/")}
+        >
+          <Text style={styles.linkText}>Back to main page</Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -172,10 +312,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#F6FAFF",
   },
-  heroPlate: {
-    color: "#D3DFF4",
-    fontWeight: "600",
-  },
   heroStatus: {
     color: "#CAE0FF",
     marginBottom: 8,
@@ -183,6 +319,15 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     color: "#C8D7F0",
+  },
+  centeredText: {
+    textAlign: "center",
+  },
+  timerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
   },
   metricValue: {
     fontSize: 28,
@@ -194,6 +339,26 @@ const styles = StyleSheet.create({
     marginTop: 8,
     color: "#FFDCC2",
     fontWeight: "600",
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    overflow: "hidden",
+    marginTop: 6,
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 4,
+  },
+  progressFillCharging: {
+    backgroundColor: "#3CE685",
+  },
+  progressFillGrace: {
+    backgroundColor: "#FFD0A8",
+  },
+  progressFillEta: {
+    backgroundColor: "#F2C94C",
   },
   sectionCard: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
@@ -240,7 +405,13 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
+  },
+  queueRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   queueText: {
     color: "#EEF5FF",
@@ -274,6 +445,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     marginTop: 8,
   },
+  linkText: { color: "#C4D2FF", textAlign: "center" },
   bgGlowOne: {
     position: "absolute",
     width: 250,

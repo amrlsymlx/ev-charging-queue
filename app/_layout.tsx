@@ -25,6 +25,10 @@ export default function RootLayout() {
           name="customer/status"
           options={{ title: "Queue Status" }}
         />
+        <Stack.Screen
+          name="public/board"
+          options={{ title: "Live Queue Board" }}
+        />
         <Stack.Screen name="sa/login" options={{ title: "SA Login" }} />
         <Stack.Screen name="sa/dashboard" options={{ title: "Dashboard" }} />
         <Stack.Screen name="admin/login" options={{ title: "Manager Login" }} />

@@ -30,6 +30,7 @@ export interface QueueEntry {
   gpsValidated: boolean;
   gpsOverrideRequested: boolean;
   gpsOverrideApproved: boolean;
+  bayId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -39,6 +40,8 @@ export interface ChargingSession {
   queueEntryId: string;
   bayId: string;
   saName: string;
+  graceMinutes: number;
+  chargingMinutes: number;
   plannedDurationMinutes: number;
   actualDurationMinutes?: number;
   startedAt?: string;

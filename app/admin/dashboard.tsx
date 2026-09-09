@@ -1,9 +1,8 @@
 import { useQueue } from "@/context/QueueContext";
 import { promptForInput, showAlert } from "@/lib/alert";
-import { getSecureItem, setSecureItem } from "@/lib/secureStorage";
 import { SUPABASE_URL, supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -25,10 +24,9 @@ type SAAccount = {
   password_plaintext?: string | null;
 };
 
-const CUSTOMER_GPS_TEST_KEY = "customer_gps_test_enabled";
-
 export default function AdminDashboard() {
   const router = useRouter();
+  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
   const { chargingSessions, bays } = useQueue();
 
   const [saAccounts, setSaAccounts] = useState<SAAccount[]>([]);
@@ -36,7 +34,9 @@ export default function AdminDashboard() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isManagerSession, setIsManagerSession] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [tab, setTab] = useState<"stats" | "home" | "settings">("home");
+  const [tab, setTab] = useState<"stats" | "home" | "settings">(
+    tabParam === "settings" || tabParam === "stats" ? tabParam : "home",
+  );
   const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [modalAccount, setModalAccount] = useState<SAAccount | null>(null);
@@ -66,22 +66,14 @@ export default function AdminDashboard() {
     verify();
     loadAccounts();
     loadShowroom();
-    void loadLocalGpsTestToggle();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadLocalGpsTestToggle = async () => {
-    try {
-      const raw = await getSecureItem(CUSTOMER_GPS_TEST_KEY);
-      if (raw === null) {
-        setGpsTestEnabled(true);
-        return;
-      }
-      setGpsTestEnabled(raw === "1");
-    } catch {
-      setGpsTestEnabled(true);
+  useEffect(() => {
+    if (tabParam === "settings" || tabParam === "stats" || tabParam === "home") {
+      setTab(tabParam);
     }
-  };
+  }, [tabParam]);
 
   const loadAccounts = async () => {
     setLoadingAccounts(true);
@@ -109,6 +101,7 @@ export default function AdminDashboard() {
       setShowroomLat(String(data.latitude ?? ""));
       setShowroomLng(String(data.longitude ?? ""));
       setGpsRadiusM(String(data.gps_radius_m ?? 50));
+      setGpsTestEnabled(data.gps_test_enabled ?? true);
     }
     setLoadingShowroom(false);
   };
@@ -140,15 +133,59 @@ export default function AdminDashboard() {
             const email = emailOrId.includes("@")
               ? emailOrId
               : `${emailOrId}@sa.internal`;
-            const { error } = await supabase
-              .from("sa_users")
-              .delete()
-              .eq("email", email);
-            if (error) throw error;
-            setMessage("SA account deleted.");
+
+            const {
+              data: { session },
+            } = await supabase.auth.getSession();
+
+            if (!session?.access_token) {
+              setMessage("Manager session missing. Please Login again.");
+              return;
+            }
+
+            const payload = { email };
+
+            const res = await supabase.functions.invoke(
+              "delete-sa-account",
+              {
+                body: payload,
+                headers: {
+                  Authorization: `Bearer ${session.access_token}`,
+                },
+              },
+            );
+
+            if (res.error) {
+              const host = new URL(SUPABASE_URL).host;
+              const projectRef = host.split(".")[0];
+              const fnUrl = projectRef
+                ? `https://${projectRef}.functions.supabase.co/delete-sa-account`
+                : null;
+              if (!fnUrl)
+                throw new Error(res.error.message || "Function invoke failed");
+
+              const fallback = await fetch(fnUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify(payload),
+              });
+
+              if (!fallback.ok) {
+                const txt = await fallback.text();
+                throw new Error(`HTTP ${fallback.status}: ${txt}`);
+              }
+            }
+
+            showAlert("Success", "SA account deletion success.");
             await loadAccounts();
           } catch (err: any) {
-            setMessage(err?.message || "Failed to delete SA account.");
+            setMessage(
+              err?.message ||
+                "Failed to delete SA account. Ensure delete function is deployed.",
+            );
           }
         },
       },
@@ -466,11 +503,15 @@ export default function AdminDashboard() {
                       setMessage("Not authorized to change this setting.");
                       return;
                     }
+                    const previous = gpsTestEnabled;
                     setGpsTestEnabled(v);
-                    try {
-                      await setSecureItem(CUSTOMER_GPS_TEST_KEY, v ? "1" : "0");
-                    } catch {
-                      setMessage("Failed to save local developer toggle.");
+                    const { error } = await supabase
+                      .from("showroom_settings")
+                      .update({ gps_test_enabled: v })
+                      .eq("id", "main");
+                    if (error) {
+                      setGpsTestEnabled(previous);
+                      setMessage(error.message);
                     }
                   }}
                   disabled={checkingAuth || !isManagerSession}
@@ -482,8 +523,6 @@ export default function AdminDashboard() {
             </View>
           </>
         )}
-
-        {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
 
       <Modal

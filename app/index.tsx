@@ -38,6 +38,12 @@ export default function Index() {
             </Pressable>
           </Link>
 
+          <Link href="/public/board" asChild>
+            <Pressable style={styles.boardActionButtonRow}>
+              <Text style={styles.boardButtonText}>Live Queue Board</Text>
+            </Pressable>
+          </Link>
+
           <Link href="/sa/login" asChild>
             <Pressable style={styles.secondaryActionButtonRow}>
               <Text style={styles.secondaryButtonText}>SA Login</Text>
@@ -173,6 +179,23 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     borderColor: "transparent",
     flex: 1,
+  },
+  boardActionButtonRow: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(242, 196, 76, 0.18)",
+    borderWidth: 0,
+    borderColor: "transparent",
+    flex: 1,
+  },
+  boardButtonText: {
+    color: "#FFF6E0",
+    fontWeight: "700",
+    fontSize: 15,
+    textAlign: "center",
   },
   bgCircleOne: {
     position: "absolute",

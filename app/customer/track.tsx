@@ -22,6 +22,7 @@ function formatPlateNumber(input: string): string {
   return parts.join(" ");
 }
 
+import PlateBadge from "@/components/PlateBadge";
 import { useQueue } from "@/context/QueueContext";
 
 export default function CustomerTrackScreen() {
@@ -67,9 +68,7 @@ export default function CustomerTrackScreen() {
           autoCapitalize="characters"
         />
 
-        {formattedLookup ? (
-          <Text style={styles.formatted}>Formatted: {formattedLookup}</Text>
-        ) : null}
+        {formattedLookup ? <PlateBadge plateNumber={formattedLookup} /> : null}
 
         <Pressable style={styles.button} onPress={handleLookup}>
           <Text style={styles.buttonText}>Find My Queue</Text>
@@ -153,7 +152,6 @@ const styles = StyleSheet.create({
     color: "#FFD0A8",
     fontWeight: "600",
   },
-  formatted: { color: "#C4D3EE", marginTop: 8, fontSize: 13 },
   linkText: { color: "#C4D2FF", textAlign: "center" },
   bgGlowOne: {
     position: "absolute",

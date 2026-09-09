@@ -35,6 +35,119 @@ export type LocationPickerCardProps = {
   helperText?: string;
 };
 
+// Hoisted to module scope: defining these inside LocationPickerCard's render
+// body gave them a new identity on every re-render, which made React
+// unmount/remount the whole Leaflet map every time the parent re-rendered
+// (e.g. every second from a live countdown tick) — Leaflet would crash
+// mid-teardown with "Cannot read properties of undefined (reading
+// '_leaflet_pos')". Stable component identity here lets react-leaflet just
+// update props instead of recreating the map.
+function MapClickHandler({
+  leaflet,
+  onChangeCoordinates,
+}: {
+  leaflet: LeafletModule;
+  onChangeCoordinates: LocationPickerCardProps["onChangeCoordinates"];
+}) {
+  leaflet.useMapEvents({
+    click: (event: any) => {
+      const { lat: clickLat, lng: clickLng } = event.latlng;
+      onChangeCoordinates(clickLat.toFixed(6), clickLng.toFixed(6));
+    },
+  });
+  return null;
+}
+
+function SyncMapCenter({
+  leaflet,
+  centerLat,
+  centerLng,
+}: {
+  leaflet: LeafletModule;
+  centerLat: number;
+  centerLng: number;
+}) {
+  const map = leaflet.useMap();
+  useEffect(() => {
+    map.setView([centerLat, centerLng]);
+  }, [map, centerLat, centerLng]);
+  return null;
+}
+
+type WebMapProps = {
+  leaflet: LeafletModule;
+  centerLat: number;
+  centerLng: number;
+  referenceLatitude: number;
+  referenceLongitude: number;
+  radiusMeters: number;
+  hasCoords: boolean;
+  parsedLat: number;
+  parsedLng: number;
+  onChangeCoordinates: LocationPickerCardProps["onChangeCoordinates"];
+};
+
+function WebMap({
+  leaflet,
+  centerLat,
+  centerLng,
+  referenceLatitude,
+  referenceLongitude,
+  radiusMeters,
+  hasCoords,
+  parsedLat,
+  parsedLng,
+  onChangeCoordinates,
+}: WebMapProps) {
+  const { MapContainer, TileLayer, CircleMarker, Circle } = leaflet;
+
+  return (
+    <View style={styles.mapHost}>
+      <MapContainer
+        center={[centerLat, centerLng]}
+        zoom={16}
+        scrollWheelZoom
+        style={{ height: 180, width: "100%" }}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <Circle
+          center={[referenceLatitude, referenceLongitude]}
+          radius={radiusMeters}
+          pathOptions={{
+            color: "#2563eb",
+            fillColor: "#2563eb",
+            fillOpacity: 0.12,
+          }}
+        />
+        <CircleMarker
+          center={[referenceLatitude, referenceLongitude]}
+          pathOptions={{ color: "#2563eb", fillColor: "#2563eb" }}
+          radius={6}
+        />
+        {hasCoords ? (
+          <CircleMarker
+            center={[parsedLat, parsedLng]}
+            pathOptions={{ color: "#22c55e", fillColor: "#4ade80" }}
+            radius={10}
+          />
+        ) : null}
+        <MapClickHandler
+          leaflet={leaflet}
+          onChangeCoordinates={onChangeCoordinates}
+        />
+        <SyncMapCenter
+          leaflet={leaflet}
+          centerLat={centerLat}
+          centerLng={centerLng}
+        />
+      </MapContainer>
+    </View>
+  );
+}
+
 export default function LocationPickerCard({
   title = "GPS Info (temporary)",
   latitude,
@@ -119,80 +232,6 @@ export default function LocationPickerCard({
     setSearchResults([]);
   };
 
-  const WebMap = () => {
-    if (!leaflet) {
-      return (
-        <Text style={styles.mapFallbackText}>Loading interactive map...</Text>
-      );
-    }
-
-    const {
-      MapContainer,
-      TileLayer,
-      CircleMarker,
-      Circle,
-      useMap,
-      useMapEvents,
-    } = leaflet;
-
-    const MapClickHandler = () => {
-      useMapEvents({
-        click: (event: any) => {
-          const { lat: clickLat, lng: clickLng } = event.latlng;
-          onChangeCoordinates(clickLat.toFixed(6), clickLng.toFixed(6));
-        },
-      });
-      return null;
-    };
-
-    const SyncMapCenter = () => {
-      const map = useMap();
-      useEffect(() => {
-        map.setView([centerLat, centerLng]);
-      }, [map]);
-      return null;
-    };
-
-    return (
-      <View style={styles.mapHost}>
-        <MapContainer
-          center={[centerLat, centerLng]}
-          zoom={16}
-          scrollWheelZoom
-          style={{ height: 180, width: "100%" }}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <Circle
-            center={[referenceLatitude, referenceLongitude]}
-            radius={radiusMeters}
-            pathOptions={{
-              color: "#2563eb",
-              fillColor: "#2563eb",
-              fillOpacity: 0.12,
-            }}
-          />
-          <CircleMarker
-            center={[referenceLatitude, referenceLongitude]}
-            pathOptions={{ color: "#2563eb", fillColor: "#2563eb" }}
-            radius={6}
-          />
-          {hasCoords ? (
-            <CircleMarker
-              center={[parsedLat, parsedLng]}
-              pathOptions={{ color: "#22c55e", fillColor: "#4ade80" }}
-              radius={10}
-            />
-          ) : null}
-          <MapClickHandler />
-          <SyncMapCenter />
-        </MapContainer>
-      </View>
-    );
-  };
-
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
@@ -244,7 +283,24 @@ export default function LocationPickerCard({
             ) : null}
           </View>
 
-          <WebMap />
+          {leaflet ? (
+            <WebMap
+              leaflet={leaflet}
+              centerLat={centerLat}
+              centerLng={centerLng}
+              referenceLatitude={referenceLatitude}
+              referenceLongitude={referenceLongitude}
+              radiusMeters={radiusMeters}
+              hasCoords={hasCoords}
+              parsedLat={parsedLat}
+              parsedLng={parsedLng}
+              onChangeCoordinates={onChangeCoordinates}
+            />
+          ) : (
+            <Text style={styles.mapFallbackText}>
+              Loading interactive map...
+            </Text>
+          )}
 
           <View style={styles.coordRow}>
             <TextInput

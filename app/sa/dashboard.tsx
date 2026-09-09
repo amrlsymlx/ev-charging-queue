@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useState } from "react";
 import {
     Pressable,
     SafeAreaView,
@@ -8,8 +9,17 @@ import {
     View,
 } from "react-native";
 
+import BatteryIndicator from "@/components/BatteryIndicator";
+import ContactBadge from "@/components/ContactBadge";
+import PlateBadge from "@/components/PlateBadge";
 import { useQueue } from "@/context/QueueContext";
-import { formatMinutes, getRemainingMinutes } from "@/lib/eta";
+import {
+    formatClockTime,
+    formatCountdown,
+    getSessionEndTime,
+    getSessionProgress,
+    getWaitProgress,
+} from "@/lib/eta";
 import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -34,11 +44,15 @@ export default function SADashboardScreen() {
     rejectOverride,
   } = useQueue();
 
+  // Forces a re-render every second so bay countdowns show live seconds.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const activeSessionByBay = new Map(
     activeSessions.map((session) => [session.bayId, session]),
-  );
-  const eligibleWaiting = waitingEntries.filter(
-    (entry) => entry.gpsValidated || entry.gpsOverrideApproved,
   );
 
   return (
@@ -91,21 +105,66 @@ export default function SADashboardScreen() {
                 </Text>
                 {activeSession?.startedAt ? (
                   <>
-                    <Text style={styles.bayMeta}>
-                      Plate: {activeEntry?.plateNumber ?? "N/A"}
-                    </Text>
-                    <Text style={styles.bayMeta}>
-                      Remaining:{" "}
-                      {formatMinutes(
-                        getRemainingMinutes(
+                    <PlateBadge plateNumber={activeEntry?.plateNumber ?? "N/A"} />
+                    <View style={styles.contactBatteryRow}>
+                      <ContactBadge
+                        phoneNumber={activeEntry?.phoneNumber ?? ""}
+                        name={activeEntry?.name ?? "N/A"}
+                      />
+                      <BatteryIndicator
+                        percentage={activeEntry?.batteryPercentage ?? 0}
+                      />
+                    </View>
+                    {(() => {
+                      const { phase, remainingSeconds, progress } =
+                        getSessionProgress(
                           activeSession.startedAt,
-                          activeSession.plannedDurationMinutes,
-                        ),
-                      )}
-                    </Text>
+                          activeSession.graceMinutes,
+                          activeSession.chargingMinutes,
+                        );
+                      const endTime = getSessionEndTime(
+                        activeSession.startedAt,
+                        activeSession.plannedDurationMinutes,
+                      );
+                      return (
+                        <>
+                          <View style={styles.timerRow}>
+                            {phase === "charging" ? (
+                              <Ionicons
+                                name="hourglass-outline"
+                                size={14}
+                                color="#D1DCF3"
+                              />
+                            ) : null}
+                            <Text style={styles.bayMeta}>
+                              {phase === "charging"
+                                ? "Charging"
+                                : phase === "grace"
+                                  ? "Initializing"
+                                  : "Session complete"}
+                              : {formatCountdown(remainingSeconds)} | Ends at:{" "}
+                              {formatClockTime(endTime)}
+                            </Text>
+                          </View>
+                          <View style={styles.progressTrack}>
+                            <View
+                              style={[
+                                styles.progressFill,
+                                phase === "charging"
+                                  ? styles.progressFillCharging
+                                  : styles.progressFillGrace,
+                                { width: `${Math.min(Math.max(progress * 100, 0), 100)}%` },
+                              ]}
+                            />
+                          </View>
+                        </>
+                      );
+                    })()}
                     <Pressable
                       style={styles.endButton}
-                      onPress={() => endCharging(activeSession.id)}
+                      onPress={() => {
+                        void endCharging(activeSession.id);
+                      }}
                     >
                       <Text style={styles.endButtonText}>End Charging</Text>
                     </Pressable>
@@ -127,47 +186,67 @@ export default function SADashboardScreen() {
           {waitingEntries.map((entry, index) => {
             const bayOne = bays.find((bay) => bay.id === "bay-1");
             const bayTwo = bays.find((bay) => bay.id === "bay-2");
-            const canStart = entry.gpsValidated || entry.gpsOverrideApproved;
 
             return (
               <View key={entry.id} style={styles.queueCard}>
-                <Text style={styles.queueTitle}>
-                  #{index + 1} {entry.plateNumber}
-                </Text>
-                <Text style={styles.bayMeta}>
-                  {entry.name} | Battery {entry.batteryPercentage}%
-                </Text>
-                <Text style={styles.bayMeta}>
-                  ETA:{" "}
-                  {canStart
-                    ? formatMinutes(getEtaForEntry(entry.id))
-                    : "Pending GPS override"}
-                </Text>
+                <Text style={styles.queueIndexBadge}>#{index + 1}</Text>
+                <PlateBadge plateNumber={entry.plateNumber} />
+                <View style={styles.contactBatteryRow}>
+                  <ContactBadge
+                    phoneNumber={entry.phoneNumber}
+                    name={entry.name}
+                  />
+                  <BatteryIndicator percentage={entry.batteryPercentage} />
+                </View>
+                {(() => {
+                  const etaSeconds = getEtaForEntry(entry.id);
+                  const startTime = new Date(Date.now() + etaSeconds * 1000);
+                  const progress = getWaitProgress(entry.joinedAt, etaSeconds);
+                  return (
+                    <>
+                      <Text style={[styles.bayMeta, styles.centeredText]}>
+                        ETA Start Charging: {formatCountdown(etaSeconds)} |
+                        ETA Start Time: {formatClockTime(startTime)}
+                      </Text>
+                      <View style={styles.progressTrack}>
+                        <View
+                          style={[
+                            styles.progressFill,
+                            styles.progressFillEta,
+                            {
+                              width: `${Math.min(Math.max(progress * 100, 0), 100)}%`,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </>
+                  );
+                })()}
 
                 <View style={styles.actionRow}>
                   <Pressable
                     style={
-                      !canStart || bayOne?.status !== "available"
+                      bayOne?.status !== "available"
                         ? styles.startButtonDisabled
                         : styles.startButtonAction
                     }
-                    disabled={!canStart || bayOne?.status !== "available"}
-                    onPress={() =>
-                      startCharging(entry.id, "bay-1", String(saName))
-                    }
+                    disabled={bayOne?.status !== "available"}
+                    onPress={() => {
+                      void startCharging(entry.id, "bay-1", String(saName));
+                    }}
                   >
                     <Text style={styles.actionButtonText}>Start Bay 1</Text>
                   </Pressable>
                   <Pressable
                     style={
-                      !canStart || bayTwo?.status !== "available"
+                      bayTwo?.status !== "available"
                         ? styles.startButtonDisabled
                         : styles.startButtonAction
                     }
-                    disabled={!canStart || bayTwo?.status !== "available"}
-                    onPress={() =>
-                      startCharging(entry.id, "bay-2", String(saName))
-                    }
+                    disabled={bayTwo?.status !== "available"}
+                    onPress={() => {
+                      void startCharging(entry.id, "bay-2", String(saName));
+                    }}
                   >
                     <Text style={styles.actionButtonText}>Start Bay 2</Text>
                   </Pressable>
@@ -176,13 +255,17 @@ export default function SADashboardScreen() {
                 <View style={styles.actionRow}>
                   <Pressable
                     style={styles.skipButtonAction}
-                    onPress={() => skipQueueEntry(entry.id)}
+                    onPress={() => {
+                      void skipQueueEntry(entry.id);
+                    }}
                   >
                     <Text style={styles.actionButtonText}>Skip Queue</Text>
                   </Pressable>
                   <Pressable
                     style={styles.removeButtonAction}
-                    onPress={() => removeQueueEntry(entry.id)}
+                    onPress={() => {
+                      void removeQueueEntry(entry.id);
+                    }}
                   >
                     <Text style={styles.actionButtonText}>Remove</Text>
                   </Pressable>
@@ -191,7 +274,7 @@ export default function SADashboardScreen() {
             );
           })}
 
-          {eligibleWaiting.length > 0 ? (
+          {waitingEntries.length > 0 ? (
             <Text style={styles.hint}>
               Tip: Start charging from top of queue for FCFS policy.
             </Text>
@@ -206,7 +289,7 @@ export default function SADashboardScreen() {
 
           {pendingOverrideEntries.map((entry) => (
             <View key={entry.id} style={styles.queueCard}>
-              <Text style={styles.queueTitle}>{entry.plateNumber}</Text>
+              <PlateBadge plateNumber={entry.plateNumber} />
               <Text style={styles.bayMeta}>
                 {entry.name} requested GPS override
               </Text>
@@ -214,13 +297,17 @@ export default function SADashboardScreen() {
               <View style={styles.actionRow}>
                 <Pressable
                   style={styles.approveButtonAction}
-                  onPress={() => approveOverride(entry.id)}
+                  onPress={() => {
+                    void approveOverride(entry.id);
+                  }}
                 >
                   <Text style={styles.actionButtonText}>Approve</Text>
                 </Pressable>
                 <Pressable
                   style={styles.rejectButtonAction}
-                  onPress={() => rejectOverride(entry.id)}
+                  onPress={() => {
+                    void rejectOverride(entry.id);
+                  }}
                 >
                   <Text style={styles.actionButtonText}>Reject</Text>
                 </Pressable>
@@ -294,6 +381,15 @@ const styles = StyleSheet.create({
     color: "#D1DCF3",
     lineHeight: 19,
   },
+  centeredText: {
+    textAlign: "center",
+  },
+  timerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
   available: {
     color: "#7CFFBA",
     fontWeight: "700",
@@ -315,18 +411,49 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontWeight: "700",
   },
+  progressTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+    overflow: "hidden",
+    marginTop: 4,
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 4,
+  },
+  progressFillCharging: {
+    backgroundColor: "#3CE685",
+  },
+  progressFillGrace: {
+    backgroundColor: "#FFD0A8",
+  },
+  progressFillEta: {
+    backgroundColor: "#F2C94C",
+  },
   queueCard: {
+    position: "relative",
     backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 0,
     borderColor: "transparent",
     borderRadius: 12,
     padding: 10,
+    paddingTop: 22,
     gap: 6,
   },
-  queueTitle: {
+  queueIndexBadge: {
+    position: "absolute",
+    top: 8,
+    left: 10,
     color: "#EEF5FF",
     fontWeight: "700",
-    fontSize: 15,
+    fontSize: 13,
+  },
+  contactBatteryRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
   },
   actionRow: {
     flexDirection: "row",

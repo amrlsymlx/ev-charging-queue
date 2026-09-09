@@ -16,14 +16,13 @@ import {
     View,
 } from "react-native";
 
+import BatteryIndicator from "../../components/BatteryIndicator";
 import LocationPickerCard from "../../components/LocationPickerCard";
+import PlateBadge from "../../components/PlateBadge";
 import { useQueue } from "../../context/QueueContext";
 import { showAlert } from "../../lib/alert";
-import { calculateEtaMinutes, formatMinutes } from "../../lib/eta";
-import { getSecureItem } from "../../lib/secureStorage";
+import { formatClockTime, formatCountdown } from "../../lib/eta";
 import { supabase } from "../../lib/supabase";
-
-const CUSTOMER_GPS_TEST_KEY = "customer_gps_test_enabled";
 
 function toRadians(value: number): number {
   return (value * Math.PI) / 180;
@@ -77,7 +76,8 @@ function toSafeBatteryValue(value: unknown): number {
 
 export default function CustomerJoinScreen() {
   const router = useRouter();
-  const { addQueueEntry, waitingEntries, bays } = useQueue();
+  const { addQueueEntry, waitingEntries, bays, getEtaForPosition } =
+    useQueue();
 
   const [name, setName] = useState("");
   const [phonePrefix, setPhonePrefix] = useState("+6017");
@@ -101,6 +101,7 @@ export default function CustomerJoinScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const loadShowroomSettings = async () => {
@@ -124,17 +125,7 @@ export default function CustomerJoinScreen() {
         setShowroomLatitude(data.latitude ?? null);
         setShowroomLongitude(data.longitude ?? null);
         setGpsLimitMeters(data.gps_radius_m ?? 50);
-      }
-
-      try {
-        const raw = await getSecureItem(CUSTOMER_GPS_TEST_KEY);
-        if (raw === null) {
-          setGpsTestEnabled(true);
-        } else {
-          setGpsTestEnabled(raw === "1");
-        }
-      } catch {
-        setGpsTestEnabled(true);
+        setGpsTestEnabled(data.gps_test_enabled ?? true);
       }
 
       setLoadingSettings(false);
@@ -151,38 +142,33 @@ export default function CustomerJoinScreen() {
     // Future: trigger permissions and attempt to read device location here.
   };
 
-  const estimatedWaitMinutes = useMemo(() => {
+  // Ticks every second so the live estimate below stays in sync with the
+  // actual bay countdowns it's derived from.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const estimatedWaitSeconds = useMemo(() => {
     try {
-      const eligible = (waitingEntries || []).filter(
-        (e) => e.gpsValidated || e.gpsOverrideApproved,
-      ).length;
-      const position = eligible + 1;
-      const bayCount = (bays && bays.length) || 2;
-      return calculateEtaMinutes(position, bayCount);
+      const position = (waitingEntries || []).length + 1;
+      return getEtaForPosition(position);
     } catch (e) {
       return null;
     }
-  }, [waitingEntries, bays]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waitingEntries, bays, getEtaForPosition, tick]);
 
   const estimatedWait = useMemo(() => {
-    if (estimatedWaitMinutes === null) return "--";
-    return formatMinutes(estimatedWaitMinutes);
-  }, [estimatedWaitMinutes]);
-
-  const formatStartFromMinutes = (minutes: number) => {
-    const d = new Date(Date.now() + minutes * 60000);
-    let hours = d.getHours();
-    const mins = d.getMinutes();
-    const ampm = hours >= 12 ? "pm" : "am";
-    hours = hours % 12;
-    if (hours === 0) hours = 12;
-    return `${hours}.${mins.toString().padStart(2, "0")}${ampm}`;
-  };
+    if (estimatedWaitSeconds === null) return "--";
+    return formatCountdown(estimatedWaitSeconds);
+  }, [estimatedWaitSeconds]);
 
   const estimatedStart = useMemo(() => {
-    if (!estimatedWaitMinutes) return "--";
-    return formatStartFromMinutes(estimatedWaitMinutes);
-  }, [estimatedWaitMinutes]);
+    if (estimatedWaitSeconds === null) return "--";
+    return formatClockTime(new Date(Date.now() + estimatedWaitSeconds * 1000));
+  }, [estimatedWaitSeconds]);
 
   const parsedCurrentLat = Number(currentLatitude);
   const parsedCurrentLng = Number(currentLongitude);
@@ -247,7 +233,7 @@ export default function CustomerJoinScreen() {
     return () => anim.stop();
   }, []);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!agreed) {
       setMessage("You must agree to the Terms & Conditions before proceeding.");
       return;
@@ -313,35 +299,42 @@ export default function CustomerJoinScreen() {
 
     const fullPhone = `${phonePrefix}${phoneLocal}`;
 
-    const entry = addQueueEntry({
-      name,
-      phoneNumber: fullPhone,
-      plateNumber,
-      batteryPercentage: battery,
-      gpsValidated,
-      gpsOverrideRequested: !gpsValidated,
-    });
+    setSubmitting(true);
+    try {
+      const entry = await addQueueEntry({
+        name,
+        phoneNumber: fullPhone,
+        plateNumber: formattedPlate || formatPlateNumber(plateNumber),
+        batteryPercentage: battery,
+        gpsValidated,
+        gpsOverrideRequested: !gpsValidated,
+      });
 
-    if (gpsValidated) {
-      setMessage("Queue join success, track your queue now.");
-      showAlert("Queue join success", "Track your queue now", [
-        { text: "Later", style: "cancel" },
-        {
-          text: "Track Queue",
-          onPress: () => router.push("/customer/track"),
-        },
-      ]);
-      return;
+      if (gpsValidated) {
+        setMessage("Queue join success, track your queue now.");
+        showAlert("Queue join success", "Track your queue now", [
+          { text: "Later", style: "cancel" },
+          {
+            text: "Track Queue",
+            onPress: () => router.push("/customer/track"),
+          },
+        ]);
+        return;
+      }
+
+      setMessage(
+        "Override request submitted. You can monitor status while waiting for SA approval.",
+      );
+
+      router.push({
+        pathname: "/customer/status",
+        params: { id: entry.id },
+      });
+    } catch (err: any) {
+      setMessage(err?.message || "Failed to join queue. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
-
-    setMessage(
-      "Override request submitted. You can monitor status while waiting for SA approval.",
-    );
-
-    router.push({
-      pathname: "/customer/status",
-      params: { id: entry.id },
-    });
   };
 
   return (
@@ -498,16 +491,10 @@ export default function CustomerJoinScreen() {
             autoCapitalize="characters"
           />
 
-          {formattedPlate ? (
-            <Text style={styles.formattedPlate}>
-              Formatted: {formattedPlate}
-            </Text>
-          ) : null}
+          {formattedPlate ? <PlateBadge plateNumber={formattedPlate} /> : null}
 
           <View style={{ marginTop: 6 }}>
-            <Text style={styles.caption}>
-              Battery: {toSafeBatteryValue(batteryPercentage)}%
-            </Text>
+            <BatteryIndicator percentage={toSafeBatteryValue(batteryPercentage)} />
             <Slider
               style={{ width: "100%", height: 40 }}
               minimumValue={0}
@@ -553,15 +540,24 @@ export default function CustomerJoinScreen() {
           </View>
 
           <Pressable
-            style={[styles.primaryButton, !agreed && styles.disabledButton]}
-            onPress={handleSubmit}
-            disabled={!agreed}
+            style={[
+              styles.primaryButton,
+              (!agreed || submitting) && styles.disabledButton,
+            ]}
+            onPress={() => {
+              void handleSubmit();
+            }}
+            disabled={!agreed || submitting}
           >
-            <Text style={styles.primaryButtonText}>
-              {gpsStatus === "valid"
-                ? "Join"
-                : "Join (Request approval from SA on duty)"}
-            </Text>
+            {submitting ? (
+              <ActivityIndicator color="#FFF6F2" />
+            ) : (
+              <Text style={styles.primaryButtonText}>
+                {gpsStatus === "valid"
+                  ? "Join"
+                  : "Join (Request approval from SA on duty)"}
+              </Text>
+            )}
           </Pressable>
         </View>
 
@@ -858,7 +854,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#111827",
     opacity: 1,
   },
-  formattedPlate: { color: "#C4D3EE", marginTop: 8, fontSize: 13 },
   retryButton: {
     marginTop: 8,
     alignItems: "center",

@@ -2,11 +2,13 @@ import {
     PropsWithChildren,
     createContext,
     useContext,
+    useEffect,
     useMemo,
+    useRef,
     useState,
 } from "react";
 
-import { calculateEtaMinutes } from "@/lib/eta";
+import { getRemainingSeconds } from "@/lib/eta";
 import { supabase } from "@/lib/supabase";
 import {
     ChargingBay,
@@ -24,91 +26,199 @@ interface QueueContextValue {
   waitingEntries: QueueEntry[];
   activeSessions: ChargingSession[];
   pendingOverrideEntries: QueueEntry[];
-  addQueueEntry: (input: NewQueueEntryInput) => QueueEntry;
+  addQueueEntry: (input: NewQueueEntryInput) => Promise<QueueEntry>;
   getQueueEntryById: (entryId: string) => QueueEntry | undefined;
   findLatestEntryByPlate: (plateNumber: string) => QueueEntry | undefined;
   getQueuePosition: (entryId: string) => number | null;
   getEtaForEntry: (entryId: string) => number;
+  getEtaForPosition: (position: number) => number;
   startCharging: (
     entryId: string,
     bayId: string,
     saName: string,
-    duration?: number,
-  ) => boolean;
-  endCharging: (sessionId: string) => boolean;
-  skipQueueEntry: (entryId: string) => void;
-  removeQueueEntry: (entryId: string) => void;
-  approveOverride: (entryId: string) => void;
-  rejectOverride: (entryId: string) => void;
-  addChargingSessionRecord: (data: {
-    queueEntryId?: string;
-    bayId: string;
-    saName: string;
-    plannedDurationMinutes?: number;
-    actualDurationMinutes?: number;
-    startedAt?: string;
-    endedAt?: string;
-    status?: "active" | "completed" | "cancelled";
-  }) => ChargingSession;
+  ) => Promise<boolean>;
+  endCharging: (sessionId: string) => Promise<boolean>;
+  skipQueueEntry: (entryId: string) => Promise<void>;
+  removeQueueEntry: (entryId: string) => Promise<void>;
+  approveOverride: (entryId: string) => Promise<void>;
+  rejectOverride: (entryId: string) => Promise<void>;
 }
 
 const QueueContext = createContext<QueueContextValue | null>(null);
 
-function nowIso() {
-  return new Date().toISOString();
+const GRACE_MINUTES = 5;
+const CHARGING_MINUTES = 60;
+
+const INITIAL_SA_USERS: SAUser[] = [];
+
+// Columns the anon (customer) role is granted; phone_number is deliberately
+// excluded at the database column-privilege level, so this list must match.
+const ANON_QUEUE_COLUMNS =
+  "id, name, plate_number, battery_percentage, joined_at, status, gps_validated, gps_override_requested, gps_override_approved, bay_id, created_at, updated_at";
+
+function mapBay(row: any): ChargingBay {
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
-function randomId(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+function mapQueueEntry(row: any): QueueEntry {
+  return {
+    id: row.id,
+    name: row.name,
+    phoneNumber: row.phone_number ?? "",
+    plateNumber: row.plate_number,
+    batteryPercentage: row.battery_percentage,
+    joinedAt: row.joined_at,
+    status: row.status,
+    gpsValidated: row.gps_validated,
+    gpsOverrideRequested: row.gps_override_requested,
+    gpsOverrideApproved: row.gps_override_approved,
+    bayId: row.bay_id ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
-const INITIAL_BAYS: ChargingBay[] = [
-  {
-    id: "bay-1",
-    name: "Bay 1",
-    status: "available",
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-  },
-  {
-    id: "bay-2",
-    name: "Bay 2",
-    status: "available",
-    createdAt: nowIso(),
-    updatedAt: nowIso(),
-  },
-];
-
-const INITIAL_SA_USERS: SAUser[] = [
-  {
-    id: "sa-1",
-    name: "Aina",
-    email: "aina.sa@showroom.local",
-    role: "sa",
-    createdAt: nowIso(),
-  },
-  {
-    id: "sa-2",
-    name: "Farid",
-    email: "farid.sa@showroom.local",
-    role: "admin",
-    createdAt: nowIso(),
-  },
-];
+function mapSession(row: any): ChargingSession {
+  return {
+    id: row.id,
+    queueEntryId: row.queue_entry_id ?? "",
+    bayId: row.bay_id,
+    saName: row.sa_name,
+    graceMinutes: row.grace_minutes,
+    chargingMinutes: row.charging_minutes,
+    plannedDurationMinutes: row.planned_duration_minutes,
+    actualDurationMinutes: row.actual_duration_minutes ?? undefined,
+    startedAt: row.started_at ?? undefined,
+    endedAt: row.ended_at ?? undefined,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
 
 export function QueueProvider({ children }: PropsWithChildren) {
-  const [bays, setBays] = useState<ChargingBay[]>(INITIAL_BAYS);
+  const [bays, setBays] = useState<ChargingBay[]>([]);
   const [queueEntries, setQueueEntries] = useState<QueueEntry[]>([]);
   const [chargingSessions, setChargingSessions] = useState<ChargingSession[]>(
     [],
   );
+  const [isStaff, setIsStaff] = useState(false);
 
-  const waitingEntries = useMemo(
+  const isStaffRef = useRef(isStaff);
+  isStaffRef.current = isStaff;
+
+  const loadBays = async () => {
+    const { data, error } = await supabase
+      .from("bays")
+      .select("*")
+      .order("id", { ascending: true });
+    if (!error && data) setBays(data.map(mapBay));
+  };
+
+  const loadChargingSessions = async () => {
+    const { data, error } = await supabase
+      .from("charging_sessions")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (!error && data) setChargingSessions(data.map(mapSession));
+  };
+
+  const loadQueueEntries = async () => {
+    const query = supabase
+      .from("queue_entries")
+      .select(isStaffRef.current ? "*" : ANON_QUEUE_COLUMNS)
+      .order("joined_at", { ascending: true });
+    const { data, error } = await query;
+    if (!error && data) setQueueEntries((data as any[]).map(mapQueueEntry));
+  };
+
+  // Track whether the current Supabase Auth session belongs to SA/manager
+  // staff, since that changes both which columns we can read and whether we
+  // get realtime pushes vs. polling for queue_entries.
+  useEffect(() => {
+    const resolveStaff = async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        const user = data?.user;
+        const role = user?.app_metadata?.role || user?.user_metadata?.role;
+        setIsStaff(role === "sa" || role === "manager" || role === "admin");
+      } catch {
+        setIsStaff(false);
+      }
+    };
+
+    resolveStaff();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      resolveStaff();
+    });
+
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    loadBays();
+    loadChargingSessions();
+    loadQueueEntries();
+
+    const baysChannel = supabase
+      .channel("public:bays")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bays" },
+        () => loadBays(),
+      )
+      .subscribe();
+
+    const sessionsChannel = supabase
+      .channel("public:charging_sessions")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "charging_sessions" },
+        () => {
+          loadChargingSessions();
+          loadQueueEntries();
+        },
+      )
+      .subscribe();
+
+    // queue_entries carries phone numbers, so it's deliberately excluded from
+    // the realtime publication (RLS row-visibility doesn't guarantee a WAL
+    // broadcast masks columns). Poll it instead; staff gets a shorter
+    // interval since they act on it directly.
+    const pollMs = isStaff ? 4000 : 5000;
+    const interval = setInterval(loadQueueEntries, pollMs);
+
+    return () => {
+      supabase.removeChannel(baysChannel);
+      supabase.removeChannel(sessionsChannel);
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStaff]);
+
+  // Entries with status "waiting", regardless of GPS approval. Entries still
+  // pending GPS override approval are NOT yet in the queue proper — they
+  // only surface via pendingOverrideEntries until an SA approves them.
+  const allWaitingEntries = useMemo(
     () =>
       queueEntries
         .filter((entry) => entry.status === "waiting")
         .sort((a, b) => +new Date(a.joinedAt) - +new Date(b.joinedAt)),
     [queueEntries],
+  );
+
+  const waitingEntries = useMemo(
+    () =>
+      allWaitingEntries.filter(
+        (entry) => entry.gpsValidated || entry.gpsOverrideApproved,
+      ),
+    [allWaitingEntries],
   );
 
   const activeSessions = useMemo(
@@ -118,60 +228,41 @@ export function QueueProvider({ children }: PropsWithChildren) {
 
   const pendingOverrideEntries = useMemo(
     () =>
-      waitingEntries.filter(
+      allWaitingEntries.filter(
         (entry) => entry.gpsOverrideRequested && !entry.gpsOverrideApproved,
       ),
-    [waitingEntries],
+    [allWaitingEntries],
   );
 
-  const addQueueEntry = (input: NewQueueEntryInput) => {
-    const timestamp = nowIso();
+  const addQueueEntry = async (
+    input: NewQueueEntryInput,
+  ): Promise<QueueEntry> => {
+    const timestamp = new Date().toISOString();
 
-    const entry: QueueEntry = {
-      id: randomId("qe"),
-      name: input.name,
-      phoneNumber: input.phoneNumber,
-      plateNumber: input.plateNumber.trim().toUpperCase(),
-      batteryPercentage: input.batteryPercentage,
-      joinedAt: timestamp,
-      status: "waiting",
-      gpsValidated: input.gpsValidated,
-      gpsOverrideRequested: input.gpsOverrideRequested,
-      gpsOverrideApproved: false,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
+    const { data, error } = await supabase
+      .from("queue_entries")
+      .insert([
+        {
+          name: input.name,
+          phone_number: input.phoneNumber,
+          plate_number: input.plateNumber.trim().toUpperCase(),
+          battery_percentage: input.batteryPercentage,
+          joined_at: timestamp,
+          status: "waiting",
+          gps_validated: input.gpsValidated,
+          gps_override_requested: input.gpsOverrideRequested,
+          gps_override_approved: false,
+        },
+      ])
+      .select(ANON_QUEUE_COLUMNS)
+      .single();
 
+    if (error || !data) {
+      throw new Error(error?.message || "Failed to join queue.");
+    }
+
+    const entry = mapQueueEntry(data);
     setQueueEntries((prev) => [...prev, entry]);
-
-    // Persist to Supabase in background (best-effort). Keep local entry for immediate UX.
-    (async () => {
-      try {
-        const { data, error } = await supabase.from("queue_entries").insert([
-          {
-            name: entry.name,
-            phone_number: entry.phoneNumber,
-            plate_number: entry.plateNumber,
-            battery_percentage: entry.batteryPercentage,
-            joined_at: entry.joinedAt,
-            status: entry.status,
-            gps_validated: entry.gpsValidated,
-            gps_override_requested: entry.gpsOverrideRequested,
-            gps_override_approved: entry.gpsOverrideApproved,
-          },
-        ]);
-
-        if (!error && data && data[0] && data[0].id) {
-          const remoteId = data[0].id as string;
-          setQueueEntries((prev) =>
-            prev.map((e) => (e.id === entry.id ? { ...e, id: remoteId } : e)),
-          );
-        }
-      } catch (e) {
-        // network or other error: keep local state
-      }
-    })();
-
     return entry;
   };
 
@@ -188,24 +279,40 @@ export function QueueProvider({ children }: PropsWithChildren) {
   };
 
   const getQueuePosition = (entryId: string) => {
-    const candidate = waitingEntries.find((entry) => entry.id === entryId);
+    const index = waitingEntries.findIndex((entry) => entry.id === entryId);
+    return index >= 0 ? index + 1 : null;
+  };
 
-    if (
-      !candidate ||
-      (!candidate.gpsValidated && !candidate.gpsOverrideApproved)
-    ) {
-      return null;
+  // Returns ETA in seconds for a given 1-indexed queue position. Position 1
+  // is served by whichever bay frees up soonest; position 2 by whichever bay
+  // frees up second-soonest; and so on — each further position simulates the
+  // person ahead of them occupying the bay they were assigned to for a full
+  // grace+charging slot.
+  const getEtaForPosition = (position: number) => {
+    if (position < 1 || bays.length === 0) {
+      return 0;
     }
 
-    const eligibleWaitingEntries = waitingEntries.filter(
-      (entry) => entry.gpsValidated || entry.gpsOverrideApproved,
+    const activeSessionByBay = new Map(
+      activeSessions.map((session) => [session.bayId, session]),
     );
+    const slotSeconds = (GRACE_MINUTES + CHARGING_MINUTES) * 60;
 
-    const index = eligibleWaitingEntries.findIndex(
-      (entry) => entry.id === entryId,
-    );
+    const freeTimes = bays.map((bay) => {
+      const session = activeSessionByBay.get(bay.id);
+      if (!session?.startedAt) return 0;
+      return getRemainingSeconds(session.startedAt, session.plannedDurationMinutes);
+    });
 
-    return index >= 0 ? index + 1 : null;
+    for (let i = 0; i < position - 1; i++) {
+      let minIndex = 0;
+      for (let j = 1; j < freeTimes.length; j++) {
+        if (freeTimes[j] < freeTimes[minIndex]) minIndex = j;
+      }
+      freeTimes[minIndex] += slotSeconds;
+    }
+
+    return Math.min(...freeTimes);
   };
 
   const getEtaForEntry = (entryId: string) => {
@@ -213,14 +320,13 @@ export function QueueProvider({ children }: PropsWithChildren) {
     if (!position) {
       return 0;
     }
-    return calculateEtaMinutes(position, 2, 65);
+    return getEtaForPosition(position);
   };
 
-  const startCharging = (
+  const startCharging = async (
     entryId: string,
     bayId: string,
     saName: string,
-    duration = 65,
   ) => {
     const entry = queueEntries.find((current) => current.id === entryId);
     const bay = bays.find((current) => current.id === bayId);
@@ -236,50 +342,45 @@ export function QueueProvider({ children }: PropsWithChildren) {
       return false;
     }
 
-    const timestamp = nowIso();
+    const timestamp = new Date().toISOString();
 
-    setQueueEntries((prev) =>
-      prev.map((current) =>
-        current.id === entryId
-          ? {
-              ...current,
-              status: "charging",
-              updatedAt: timestamp,
-            }
-          : current,
-      ),
-    );
+    const { error: entryError } = await supabase
+      .from("queue_entries")
+      .update({ status: "charging", bay_id: bayId, updated_at: timestamp })
+      .eq("id", entryId);
 
-    setBays((prev) =>
-      prev.map((current) =>
-        current.id === bayId
-          ? {
-              ...current,
-              status: "occupied",
-              updatedAt: timestamp,
-            }
-          : current,
-      ),
-    );
+    if (entryError) return false;
 
-    setChargingSessions((prev) => [
-      ...prev,
-      {
-        id: randomId("cs"),
-        queueEntryId: entryId,
-        bayId,
-        saName,
-        plannedDurationMinutes: duration,
-        status: "active",
-        startedAt: timestamp,
-        createdAt: timestamp,
-      },
-    ]);
+    const { error: bayError } = await supabase
+      .from("bays")
+      .update({ status: "occupied", updated_at: timestamp })
+      .eq("id", bayId);
+
+    if (bayError) return false;
+
+    const { error: sessionError } = await supabase
+      .from("charging_sessions")
+      .insert([
+        {
+          queue_entry_id: entryId,
+          bay_id: bayId,
+          sa_name: saName,
+          grace_minutes: GRACE_MINUTES,
+          charging_minutes: CHARGING_MINUTES,
+          planned_duration_minutes: GRACE_MINUTES + CHARGING_MINUTES,
+          status: "active",
+          started_at: timestamp,
+        },
+      ]);
+
+    if (sessionError) return false;
+
+    await Promise.all([loadQueueEntries(), loadBays(), loadChargingSessions()]);
 
     return true;
   };
 
-  const endCharging = (sessionId: string) => {
+  const endCharging = async (sessionId: string) => {
     const session = chargingSessions.find(
       (current) => current.id === sessionId,
     );
@@ -288,202 +389,81 @@ export function QueueProvider({ children }: PropsWithChildren) {
       return false;
     }
 
-    const timestamp = nowIso();
+    const timestamp = new Date().toISOString();
     const actualDurationMinutes = Math.max(
       Math.floor((+new Date(timestamp) - +new Date(session.startedAt)) / 60000),
       0,
     );
 
-    setChargingSessions((prev) =>
-      prev.map((current) =>
-        current.id === sessionId
-          ? {
-              ...current,
-              status: "completed",
-              actualDurationMinutes,
-              endedAt: timestamp,
-            }
-          : current,
-      ),
-    );
+    const { error: sessionError } = await supabase
+      .from("charging_sessions")
+      .update({
+        status: "completed",
+        actual_duration_minutes: actualDurationMinutes,
+        ended_at: timestamp,
+      })
+      .eq("id", sessionId);
 
-    setQueueEntries((prev) =>
-      prev.map((current) =>
-        current.id === session.queueEntryId
-          ? {
-              ...current,
-              status: "completed",
-              updatedAt: timestamp,
-            }
-          : current,
-      ),
-    );
+    if (sessionError) return false;
 
-    setBays((prev) =>
-      prev.map((current) =>
-        current.id === session.bayId
-          ? {
-              ...current,
-              status: "available",
-              updatedAt: timestamp,
-            }
-          : current,
-      ),
-    );
+    await supabase
+      .from("queue_entries")
+      .update({ status: "completed", updated_at: timestamp })
+      .eq("id", session.queueEntryId);
+
+    await supabase
+      .from("bays")
+      .update({ status: "available", updated_at: timestamp })
+      .eq("id", session.bayId);
+
+    await Promise.all([loadQueueEntries(), loadBays(), loadChargingSessions()]);
 
     return true;
   };
 
-  const skipQueueEntry = (entryId: string) => {
-    const timestamp = nowIso();
-    setQueueEntries((prev) =>
-      prev.map((entry) =>
-        entry.id === entryId
-          ? {
-              ...entry,
-              status: "skipped",
-              updatedAt: timestamp,
-            }
-          : entry,
-      ),
-    );
+  const skipQueueEntry = async (entryId: string) => {
+    const timestamp = new Date().toISOString();
+    const { error } = await supabase
+      .from("queue_entries")
+      .update({ status: "skipped", updated_at: timestamp })
+      .eq("id", entryId);
+    if (!error) await loadQueueEntries();
   };
 
-  const removeQueueEntry = (entryId: string) => {
-    const timestamp = nowIso();
-    setQueueEntries((prev) =>
-      prev.map((entry) =>
-        entry.id === entryId
-          ? {
-              ...entry,
-              status: "cancelled",
-              updatedAt: timestamp,
-            }
-          : entry,
-      ),
-    );
+  const removeQueueEntry = async (entryId: string) => {
+    const timestamp = new Date().toISOString();
+    const { error } = await supabase
+      .from("queue_entries")
+      .update({ status: "cancelled", updated_at: timestamp })
+      .eq("id", entryId);
+    if (!error) await loadQueueEntries();
   };
 
-  const approveOverride = (entryId: string) => {
-    const timestamp = nowIso();
-    setQueueEntries((prev) =>
-      prev.map((entry) =>
-        entry.id === entryId
-          ? {
-              ...entry,
-              gpsOverrideRequested: false,
-              gpsOverrideApproved: true,
-              updatedAt: timestamp,
-            }
-          : entry,
-      ),
-    );
+  const approveOverride = async (entryId: string) => {
+    const timestamp = new Date().toISOString();
+    const { error } = await supabase
+      .from("queue_entries")
+      .update({
+        gps_override_requested: false,
+        gps_override_approved: true,
+        updated_at: timestamp,
+      })
+      .eq("id", entryId);
+    if (!error) await loadQueueEntries();
   };
 
-  const addChargingSessionRecord = (data: {
-    queueEntryId?: string;
-    bayId: string;
-    saName: string;
-    plannedDurationMinutes?: number;
-    actualDurationMinutes?: number;
-    startedAt?: string;
-    endedAt?: string;
-    status?: "active" | "completed" | "cancelled";
-  }) => {
-    const timestamp = nowIso();
-    const session: ChargingSession = {
-      id: randomId("cs"),
-      queueEntryId: data.queueEntryId ?? "",
-      bayId: data.bayId,
-      saName: data.saName,
-      plannedDurationMinutes: data.plannedDurationMinutes ?? 65,
-      actualDurationMinutes: data.actualDurationMinutes,
-      startedAt: data.startedAt,
-      endedAt: data.endedAt,
-      status: data.status ?? (data.endedAt ? "completed" : "active"),
-      createdAt: timestamp,
-    };
-
-    setChargingSessions((prev) => [...prev, session]);
-
-    // Persist charging session to Supabase in background.
-    (async () => {
-      try {
-        const { data: inserted, error } = await supabase
-          .from("charging_sessions")
-          .insert([
-            {
-              queue_entry_id: data.queueEntryId || null,
-              bay_id: data.bayId,
-              sa_name: data.saName,
-              planned_duration_minutes: session.plannedDurationMinutes,
-              actual_duration_minutes: session.actualDurationMinutes,
-              started_at: session.startedAt || null,
-              ended_at: session.endedAt || null,
-              status: session.status,
-            },
-          ]);
-
-        if (!error && inserted && inserted[0] && inserted[0].id) {
-          const remoteId = inserted[0].id as string;
-          setChargingSessions((prev) =>
-            prev.map((s) => (s.id === session.id ? { ...s, id: remoteId } : s)),
-          );
-        }
-      } catch (e) {
-        // swallow for now
-      }
-    })();
-
-    // If a queueEntryId was provided and the session is completed, mark it completed
-    if (data.queueEntryId && session.status === "completed") {
-      setQueueEntries((prev) =>
-        prev.map((entry) =>
-          entry.id === data.queueEntryId
-            ? { ...entry, status: "completed", updatedAt: timestamp }
-            : entry,
-        ),
-      );
-    }
-
-    // If ended, free the bay
-    if (data.endedAt) {
-      setBays((prev) =>
-        prev.map((b) =>
-          b.id === data.bayId
-            ? { ...b, status: "available", updatedAt: timestamp }
-            : b,
-        ),
-      );
-    } else {
-      // otherwise occupy the bay
-      setBays((prev) =>
-        prev.map((b) =>
-          b.id === data.bayId
-            ? { ...b, status: "occupied", updatedAt: timestamp }
-            : b,
-        ),
-      );
-    }
-
-    return session;
-  };
-
-  const rejectOverride = (entryId: string) => {
-    const timestamp = nowIso();
-    setQueueEntries((prev) =>
-      prev.map((entry) =>
-        entry.id === entryId
-          ? {
-              ...entry,
-              gpsOverrideRequested: false,
-              gpsOverrideApproved: false,
-              status: "cancelled",
-              updatedAt: timestamp,
-            }
-          : entry,
-      ),
-    );
+  const rejectOverride = async (entryId: string) => {
+    const timestamp = new Date().toISOString();
+    const { error } = await supabase
+      .from("queue_entries")
+      .update({
+        gps_override_requested: false,
+        gps_override_approved: false,
+        status: "cancelled",
+        updated_at: timestamp,
+      })
+      .eq("id", entryId);
+    if (!error) await loadQueueEntries();
   };
 
   const value: QueueContextValue = {
@@ -499,13 +479,13 @@ export function QueueProvider({ children }: PropsWithChildren) {
     findLatestEntryByPlate,
     getQueuePosition,
     getEtaForEntry,
+    getEtaForPosition,
     startCharging,
     endCharging,
     skipQueueEntry,
     removeQueueEntry,
     approveOverride,
     rejectOverride,
-    addChargingSessionRecord,
   };
 
   return (

@@ -32,6 +32,98 @@ function parseOrDefault(value: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+// Hoisted to module scope: defining these inside the screen's render body
+// gave them a new identity on every re-render, which made React
+// unmount/remount the whole Leaflet map every time the parent re-rendered —
+// Leaflet would crash mid-teardown with "Cannot read properties of
+// undefined (reading '_leaflet_pos')". Stable component identity here lets
+// react-leaflet just update props instead of recreating the map.
+function MapClickHandler({
+  leaflet,
+  onPick,
+}: {
+  leaflet: LeafletModule;
+  onPick: (latitude: number, longitude: number) => void;
+}) {
+  leaflet.useMapEvents({
+    click: (event: any) => {
+      const { lat: latitude, lng: longitude } = event.latlng;
+      onPick(latitude, longitude);
+    },
+  });
+  return null;
+}
+
+function SyncMapCenter({
+  leaflet,
+  centerLat,
+  centerLng,
+}: {
+  leaflet: LeafletModule;
+  centerLat: number;
+  centerLng: number;
+}) {
+  const map = leaflet.useMap();
+  useEffect(() => {
+    map.setView([centerLat, centerLng]);
+  }, [map, centerLat, centerLng]);
+  return null;
+}
+
+type WebMapProps = {
+  leaflet: LeafletModule;
+  parsedLat: number;
+  parsedLng: number;
+  parsedRadius: number;
+  onPick: (latitude: number, longitude: number) => void;
+};
+
+function WebMap({
+  leaflet,
+  parsedLat,
+  parsedLng,
+  parsedRadius,
+  onPick,
+}: WebMapProps) {
+  const { MapContainer, TileLayer, CircleMarker, Circle } = leaflet;
+
+  return (
+    <View style={styles.mapHost}>
+      <MapContainer
+        center={[parsedLat, parsedLng]}
+        zoom={16}
+        scrollWheelZoom
+        style={styles.webLeafletMap as any}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <Circle
+          center={[parsedLat, parsedLng]}
+          radius={parsedRadius}
+          pathOptions={{
+            color: "#2563eb",
+            fillColor: "#2563eb",
+            fillOpacity: 0.15,
+          }}
+        />
+        <CircleMarker
+          center={[parsedLat, parsedLng]}
+          pathOptions={{ color: "#2563eb", fillColor: "#60a5fa" }}
+          radius={10}
+        />
+        <MapClickHandler leaflet={leaflet} onPick={onPick} />
+        <SyncMapCenter
+          leaflet={leaflet}
+          centerLat={parsedLat}
+          centerLng={parsedLng}
+        />
+      </MapContainer>
+    </View>
+  );
+}
+
 export default function ShowroomSettingsScreen() {
   const router = useRouter();
   const [showroomName, setShowroomName] = useState("Main Showroom");
@@ -162,73 +254,6 @@ export default function ShowroomSettingsScreen() {
     router.replace("/admin/dashboard");
   };
 
-  const WebMap = () => {
-    if (!leaflet) {
-      return (
-        <Text style={styles.mapFallbackText}>Loading interactive map...</Text>
-      );
-    }
-
-    const {
-      MapContainer,
-      TileLayer,
-      CircleMarker,
-      Circle,
-      useMap,
-      useMapEvents,
-    } = leaflet;
-
-    const MapClickHandler = () => {
-      useMapEvents({
-        click: (event: any) => {
-          const { lat: latitude, lng: longitude } = event.latlng;
-          applyPickedLocation(latitude, longitude);
-        },
-      });
-      return null;
-    };
-
-    const SyncMapCenter = () => {
-      const map = useMap();
-      useEffect(() => {
-        map.setView([parsedLat, parsedLng]);
-      }, [map, parsedLat, parsedLng]);
-      return null;
-    };
-
-    return (
-      <View style={styles.mapHost}>
-        <MapContainer
-          center={[parsedLat, parsedLng]}
-          zoom={16}
-          scrollWheelZoom
-          style={styles.webLeafletMap as any}
-        >
-          <TileLayer
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          />
-          <Circle
-            center={[parsedLat, parsedLng]}
-            radius={parsedRadius}
-            pathOptions={{
-              color: "#2563eb",
-              fillColor: "#2563eb",
-              fillOpacity: 0.15,
-            }}
-          />
-          <CircleMarker
-            center={[parsedLat, parsedLng]}
-            pathOptions={{ color: "#2563eb", fillColor: "#60a5fa" }}
-            radius={10}
-          />
-          <MapClickHandler />
-          <SyncMapCenter />
-        </MapContainer>
-      </View>
-    );
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -315,7 +340,19 @@ export default function ShowroomSettingsScreen() {
                   ) : null}
                 </View>
 
-                <WebMap />
+                {leaflet ? (
+                  <WebMap
+                    leaflet={leaflet}
+                    parsedLat={parsedLat}
+                    parsedLng={parsedLng}
+                    parsedRadius={parsedRadius}
+                    onPick={applyPickedLocation}
+                  />
+                ) : (
+                  <Text style={styles.mapFallbackText}>
+                    Loading interactive map...
+                  </Text>
+                )}
 
                 <View style={styles.mapActionsRow}>
                   <Pressable

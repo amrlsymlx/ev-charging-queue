@@ -50,8 +50,6 @@ export default function AdminLoginScreen() {
       password,
     });
 
-    console.log("ACCESS TOKEN:", data.session?.access_token);
-
     if (error || !data.user) {
       setMessage(error?.message || "Login failed. Please check credentials.");
       setLoading(false);
