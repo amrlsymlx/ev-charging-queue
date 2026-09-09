@@ -1,3 +1,4 @@
+import { showAlert } from "@/lib/alert";
 import {
   deleteSecureItem,
   getSecureItem,
@@ -6,10 +7,12 @@ import {
 import { supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import type { User } from "@supabase/supabase-js";
+import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   SafeAreaView,
   StyleSheet,
@@ -28,6 +31,11 @@ export default function AdminLoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotSending, setForgotSending] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState<string | null>(null);
 
   const isManager = (user: User) => {
     const role = user.app_metadata?.role || user.user_metadata?.role;
@@ -59,7 +67,7 @@ export default function AdminLoginScreen() {
     if (!isManager(data.user)) {
       await supabase.auth.signOut();
       setMessage(
-        "Account is authenticated but not assigned manager role. Set role=manager in Supabase user metadata.",
+        "Invalid manager account. Try login as SA.",
       );
       setLoading(false);
       return;
@@ -86,40 +94,43 @@ export default function AdminLoginScreen() {
     });
   };
 
-  const onCreateManagerAccount = async () => {
-    const normalizedEmail = email.trim().toLowerCase();
+  const onOpenForgotPassword = () => {
+    setForgotEmail(email.trim());
+    setForgotMessage(null);
+    setShowForgotModal(true);
+  };
 
-    if (!normalizedEmail || !password) {
-      setMessage("Enter email and password before creating manager account.");
+  const onSendResetLink = async () => {
+    const normalizedEmail = forgotEmail.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      setForgotMessage("Enter your manager email.");
       return;
     }
 
-    setLoading(true);
-    setMessage(null);
+    setForgotSending(true);
+    setForgotMessage(null);
 
-    const { data, error } = await supabase.auth.signUp({
-      email: normalizedEmail,
-      password,
-      options: {
-        data: {
-          role: "manager",
-        },
-      },
-    });
+    const { error } = await supabase.auth.resetPasswordForEmail(
+      normalizedEmail,
+      { redirectTo: Linking.createURL("/admin/reset-password") },
+    );
+
+    setForgotSending(false);
+    setShowForgotModal(false);
+    setForgotEmail("");
+
+    // Always show the same message, whether or not the email exists, so the
+    // form can't be used to probe which manager emails are registered.
+    showAlert(
+      "Check your email",
+      "If that email belongs to a manager account, a password reset link has been sent.",
+    );
 
     if (error) {
-      setMessage(error.message);
-      setLoading(false);
-      return;
+      // eslint-disable-next-line no-console
+      console.warn("resetPasswordForEmail failed:", error.message);
     }
-
-    const needsEmailConfirmation = !data.session;
-    setLoading(false);
-    setMessage(
-      needsEmailConfirmation
-        ? "Manager account created. Confirm email in inbox, then Login."
-        : "Manager account created in Supabase. You can Login now.",
-    );
   };
 
   useEffect(() => {
@@ -198,6 +209,14 @@ export default function AdminLoginScreen() {
           )}
         </Pressable>
 
+        <Pressable
+          style={styles.secondaryButton}
+          onPress={onOpenForgotPassword}
+          disabled={loading}
+        >
+          <Text style={styles.secondaryButtonText}>Forgot password?</Text>
+        </Pressable>
+
         {message ? <Text style={styles.message}>{message}</Text> : null}
       </View>
 
@@ -207,6 +226,62 @@ export default function AdminLoginScreen() {
       >
         <Text style={styles.linkText}>Back to main page</Text>
       </Pressable>
+
+      <Modal
+        visible={showForgotModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowForgotModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Reset Password</Text>
+            <Text style={styles.subtitle}>
+              Enter your manager email and we&apos;ll send you a link to
+              reset your password.
+            </Text>
+
+            <TextInput
+              style={styles.input}
+              value={forgotEmail}
+              onChangeText={setForgotEmail}
+              placeholder="Manager Email"
+              placeholderTextColor="#7E8EA8"
+              autoCapitalize="none"
+              keyboardType="email-address"
+              autoFocus
+            />
+
+            {forgotMessage ? (
+              <Text style={styles.message}>{forgotMessage}</Text>
+            ) : null}
+
+            <View style={{ flexDirection: "row", marginTop: 12, gap: 8 }}>
+              <Pressable
+                style={[styles.secondaryButton, { flex: 1 }]}
+                onPress={() => {
+                  setShowForgotModal(false);
+                  setForgotMessage(null);
+                }}
+                disabled={forgotSending}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.button, { flex: 1, marginTop: 0 }]}
+                onPress={onSendResetLink}
+                disabled={forgotSending}
+              >
+                {forgotSending ? (
+                  <ActivityIndicator color="#FFF6F2" />
+                ) : (
+                  <Text style={styles.buttonText}>Send Link</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -282,4 +357,25 @@ const styles = StyleSheet.create({
   secondaryButtonText: { color: "#DDE8FF", fontWeight: "700" },
   message: { color: "#FFD0A8", marginTop: 8 },
   linkText: { color: "#C4D2FF", textAlign: "center" },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 16,
+  },
+  modalContainer: {
+    width: "100%",
+    maxWidth: 480,
+    backgroundColor: "rgba(12,16,26,0.98)",
+    borderRadius: 14,
+    padding: 18,
+  },
+  modalTitle: {
+    color: "#F6FAFF",
+    fontWeight: "700",
+    fontSize: 18,
+    textAlign: "center",
+    marginBottom: 8,
+  },
 });

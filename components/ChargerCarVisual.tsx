@@ -9,12 +9,56 @@ import Animated, {
 } from "react-native-reanimated";
 import Svg, {
     Circle,
+    ClipPath,
+    Defs,
     Ellipse,
     G,
     Path,
     Rect,
     Text as SvgText,
 } from "react-native-svg";
+
+// Diagonal caution-tape stripes clipped to a rect, used to flag a disabled
+// bay the way a physical hazard barrier would.
+function HazardStripes({
+  x,
+  y,
+  width,
+  height,
+  clipId,
+}: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  clipId: string;
+}) {
+  const stripeWidth = 9;
+  const stripes = [];
+  const count = Math.ceil((width + height) / stripeWidth) + 2;
+
+  for (let i = 0; i < count; i++) {
+    const offset = i * stripeWidth - height;
+    stripes.push(
+      <Path
+        key={i}
+        d={`M${x + offset},${y + height} L${x + offset + height},${y} L${x + offset + height + stripeWidth},${y} L${x + offset + stripeWidth},${y + height} Z`}
+        fill={i % 2 === 0 ? "#F2C94C" : "#1B2A46"}
+      />,
+    );
+  }
+
+  return (
+    <>
+      <Defs>
+        <ClipPath id={clipId}>
+          <Rect x={x} y={y} width={width} height={height} rx={6} />
+        </ClipPath>
+      </Defs>
+      <G clipPath={`url(#${clipId})`}>{stripes}</G>
+    </>
+  );
+}
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -73,11 +117,14 @@ function CurrentDot({ phase, active }: { phase: number; active: boolean }) {
 export default function ChargerCarVisual({
   active,
   colorAccent = "#3CE685",
+  disabled = false,
 }: {
   active: boolean;
   colorAccent?: string;
+  disabled?: boolean;
 }) {
   const ledOpacity = useSharedValue(0.35);
+  const showDisabledGraphic = disabled && !active;
 
   useEffect(() => {
     if (active) {
@@ -86,11 +133,17 @@ export default function ChargerCarVisual({
         -1,
         true,
       );
+    } else if (showDisabledGraphic) {
+      ledOpacity.value = withRepeat(
+        withTiming(1, { duration: 500, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true,
+      );
     } else {
       ledOpacity.value = 0.35;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active]);
+  }, [active, showDisabledGraphic]);
 
   const ledAnimatedProps = useAnimatedProps(() => ({
     opacity: ledOpacity.value,
@@ -119,16 +172,25 @@ export default function ChargerCarVisual({
           height={82}
           rx={8}
           fill="#DCE4F0"
+          opacity={showDisabledGraphic ? 0.5 : 1}
         />
         <Rect x={42} y={78} width={12} height={11} rx={2} fill="#12213B" />
         <AnimatedCircle
           cx={48}
           cy={73}
           r={2.6}
-          fill={active ? "#3CE685" : "#8FA0C4"}
+          fill={showDisabledGraphic ? "#FF5B5B" : active ? "#3CE685" : "#8FA0C4"}
           animatedProps={ledAnimatedProps}
         />
-        <Rect x={42} y={93} width={12} height={6} rx={2} fill="#3CE685" opacity={0.85} />
+        <Rect
+          x={42}
+          y={93}
+          width={12}
+          height={6}
+          rx={2}
+          fill={showDisabledGraphic ? "#FF5B5B" : "#3CE685"}
+          opacity={0.85}
+        />
         <Rect x={42} y={102} width={12} height={3} rx={1.5} fill="#AEBBD4" />
         <Circle cx={CABLE_START.x} cy={CABLE_START.y} r={3} fill="#8FA0C4" />
 
@@ -370,8 +432,30 @@ export default function ChargerCarVisual({
             <Rect x={210} y={490} width={26} height={36} rx={8} fill="#FFD166" />
           </G>
         ) : null}
+
+        {/* Hazard barrier across the bay, shown when disabled and idle */}
+        {showDisabledGraphic ? (
+          <>
+            <HazardStripes x={70} y={128} width={150} height={16} clipId="hazard-clip" />
+            <Circle cx={145} cy={80} r={30} fill="#12213B" opacity={0.85} />
+            <Path
+              d="M145,64 L163,94 L127,94 Z"
+              fill="none"
+              stroke="#F2C94C"
+              strokeWidth={4}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+            <Rect x={143} y={78} width={4} height={9} rx={2} fill="#F2C94C" />
+            <Circle cx={145} cy={90} r={1.8} fill="#F2C94C" />
+          </>
+        ) : null}
       </Svg>
-      {!active ? <Text style={styles.idleLabel}>No vehicle connected</Text> : null}
+      {showDisabledGraphic ? (
+        <Text style={styles.disabledLabel}>Bay disabled</Text>
+      ) : !active ? (
+        <Text style={styles.idleLabel}>No vehicle connected</Text>
+      ) : null}
     </View>
   );
 }
@@ -387,5 +471,12 @@ const styles = StyleSheet.create({
     color: "#8FA0C4",
     fontSize: 12,
     fontStyle: "italic",
+  },
+  disabledLabel: {
+    position: "absolute",
+    bottom: 6,
+    color: "#FF9B8A",
+    fontSize: 12,
+    fontWeight: "700",
   },
 });

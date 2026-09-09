@@ -1,4 +1,5 @@
 import { useQueue } from "@/context/QueueContext";
+import { logActivity } from "@/lib/activityLog";
 import { promptForInput, showAlert } from "@/lib/alert";
 import { SUPABASE_URL, supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
@@ -21,6 +22,7 @@ type SAAccount = {
   id: string;
   name: string;
   email: string;
+  role: string;
   password_plaintext?: string | null;
 };
 
@@ -46,8 +48,14 @@ export default function AdminDashboard() {
   const [showroomLat, setShowroomLat] = useState("");
   const [showroomLng, setShowroomLng] = useState("");
   const [gpsRadiusM, setGpsRadiusM] = useState("50");
+  const [graceMinutes, setGraceMinutes] = useState("5");
+  const [chargingMinutes, setChargingMinutes] = useState("60");
   const [gpsTestEnabled, setGpsTestEnabled] = useState(false);
   const [loadingShowroom, setLoadingShowroom] = useState(false);
+
+  const [blockedPlateCount, setBlockedPlateCount] = useState(0);
+  const [loadingBlockedPlateCount, setLoadingBlockedPlateCount] =
+    useState(false);
 
   useEffect(() => {
     const verify = async () => {
@@ -66,6 +74,7 @@ export default function AdminDashboard() {
     verify();
     loadAccounts();
     loadShowroom();
+    loadBlockedPlateCount();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -79,7 +88,7 @@ export default function AdminDashboard() {
     setLoadingAccounts(true);
     const { data, error } = await supabase
       .from("sa_users")
-      .select("id, name, email, password_plaintext")
+      .select("id, name, email, role, password_plaintext")
       .order("created_at", { ascending: false });
     if (error) setMessage(error.message);
     setSaAccounts((data as SAAccount[]) || []);
@@ -101,9 +110,21 @@ export default function AdminDashboard() {
       setShowroomLat(String(data.latitude ?? ""));
       setShowroomLng(String(data.longitude ?? ""));
       setGpsRadiusM(String(data.gps_radius_m ?? 50));
+      setGraceMinutes(String(data.grace_minutes ?? 5));
+      setChargingMinutes(String(data.charging_minutes ?? 60));
       setGpsTestEnabled(data.gps_test_enabled ?? true);
     }
     setLoadingShowroom(false);
+  };
+
+  const loadBlockedPlateCount = async () => {
+    setLoadingBlockedPlateCount(true);
+    const { count, error } = await supabase
+      .from("blocked_plates")
+      .select("id", { count: "exact", head: true });
+    if (error) setMessage(error.message);
+    setBlockedPlateCount(count ?? 0);
+    setLoadingBlockedPlateCount(false);
   };
 
   const onDeleteSAAccount = async (emailOrId: string) => {
@@ -203,6 +224,154 @@ export default function AdminDashboard() {
     count: chargingSessions.filter((s) => s.bayId === bay.id).length,
   }));
 
+  const saOnlyAccounts = saAccounts.filter((a) => a.role !== "manager" && a.role !== "admin");
+  const managerAccounts = saAccounts.filter((a) => a.role === "manager" || a.role === "admin");
+
+  const renderAccountRow = (
+    account: SAAccount,
+    isLast: boolean,
+    idLabel: string,
+    idValue: string,
+    subtitle?: string,
+  ) => {
+    const isManagerAccount =
+      account.role === "manager" || account.role === "admin";
+
+    return (
+    <View
+      key={account.id}
+      style={[
+        styles.accountRow,
+        styles.rowWrap,
+        !isLast && styles.accountDivider,
+      ]}
+    >
+      <View>
+        {subtitle ? (
+          <Text style={styles.accountName}>{subtitle}</Text>
+        ) : null}
+        <Text style={styles.accountName}>
+          {idLabel}: <Text style={styles.accountEmail}>{idValue}</Text>
+        </Text>
+      </View>
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        <Pressable
+          onPress={() =>
+            setOpenMenuFor(openMenuFor === account.id ? null : account.id)
+          }
+          style={{ padding: 8 }}
+          accessibilityLabel="More actions"
+        >
+          <Ionicons name="ellipsis-vertical" size={20} color="#F8FBFF" />
+        </Pressable>
+
+        {openMenuFor === account.id ? (
+          <View style={styles.menu}>
+            {isManagerAccount ? null : (
+              <Pressable
+                style={styles.menuItem}
+                onPress={() => {
+                  setOpenMenuFor(null);
+                  setModalAccount(account);
+                  setShowPasswordModal(true);
+                }}
+              >
+                <Text style={styles.menuText}>View Password</Text>
+              </Pressable>
+            )}
+
+            <Pressable
+              style={styles.menuItem}
+              onPress={async () => {
+                setOpenMenuFor(null);
+                const newPass = await promptForInput(
+                  `Reset password for ${account.email}`,
+                  "Enter new password",
+                );
+                if (!newPass) return;
+
+                try {
+                  const {
+                    data: { session },
+                  } = await supabase.auth.getSession();
+
+                  if (!session?.access_token) {
+                    setMessage("Manager session missing. Please Login again.");
+                    return;
+                  }
+
+                  const payload = {
+                    email: account.email,
+                    password: newPass,
+                  };
+
+                  const res = await supabase.functions.invoke(
+                    "reset-sa-password",
+                    {
+                      body: payload,
+                      headers: {
+                        Authorization: `Bearer ${session.access_token}`,
+                      },
+                    },
+                  );
+
+                  if (res.error) {
+                    const host = new URL(SUPABASE_URL).host;
+                    const projectRef = host.split(".")[0];
+                    const fnUrl = projectRef
+                      ? `https://${projectRef}.functions.supabase.co/reset-sa-password`
+                      : null;
+                    if (!fnUrl)
+                      throw new Error(
+                        res.error.message || "Function invoke failed",
+                      );
+
+                    const fallback = await fetch(fnUrl, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${session.access_token}`,
+                      },
+                      body: JSON.stringify(payload),
+                    });
+
+                    if (!fallback.ok) {
+                      const txt = await fallback.text();
+                      throw new Error(`HTTP ${fallback.status}: ${txt}`);
+                    }
+                  }
+
+                  setMessage("Password reset.");
+                  await loadAccounts();
+                } catch (err: any) {
+                  setMessage(
+                    err?.message ||
+                      "Failed to reset password. Ensure reset function is deployed.",
+                  );
+                }
+              }}
+            >
+              <Text style={styles.menuText}>Reset Password</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => {
+                setOpenMenuFor(null);
+                onDeleteSAAccount(account.email);
+              }}
+            >
+              <Text style={[styles.menuText, { color: "#FFB3A0" }]}>
+                Delete Account
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+    </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -284,168 +453,19 @@ export default function AdminDashboard() {
               <View style={styles.listWrapper}>
                 {loadingAccounts ? (
                   <ActivityIndicator color="#D1DCF3" />
-                ) : saAccounts.length === 0 ? (
+                ) : saOnlyAccounts.length === 0 ? (
                   <Text style={styles.row}>No SA accounts found.</Text>
                 ) : (
-                  saAccounts.map((account, idx) => {
-                    const isLast = idx === saAccounts.length - 1;
-                    const saId = (
-                      account.email ||
-                      account.name ||
-                      account.id
-                    ).split("@")[0];
-                    return (
-                      <View
-                        key={account.id}
-                        style={[
-                          styles.accountRow,
-                          styles.rowWrap,
-                          !isLast && styles.accountDivider,
-                        ]}
-                      >
-                        <View>
-                          <Text style={styles.accountName}>
-                            SA ID:{" "}
-                            <Text style={styles.accountEmail}>{saId}</Text>
-                          </Text>
-                        </View>
-                        <View
-                          style={{ flexDirection: "row", alignItems: "center" }}
-                        >
-                          <Pressable
-                            onPress={() =>
-                              setOpenMenuFor(
-                                openMenuFor === account.id ? null : account.id,
-                              )
-                            }
-                            style={{ padding: 8 }}
-                            accessibilityLabel="More actions"
-                          >
-                            <Ionicons
-                              name="ellipsis-vertical"
-                              size={20}
-                              color="#F8FBFF"
-                            />
-                          </Pressable>
-
-                          {openMenuFor === account.id ? (
-                            <View style={styles.menu}>
-                              <Pressable
-                                style={styles.menuItem}
-                                onPress={() => {
-                                  setOpenMenuFor(null);
-                                  setModalAccount(account);
-                                  setShowPasswordModal(true);
-                                }}
-                              >
-                                <Text style={styles.menuText}>
-                                  View Password
-                                </Text>
-                              </Pressable>
-
-                              <Pressable
-                                style={styles.menuItem}
-                                onPress={async () => {
-                                  setOpenMenuFor(null);
-                                  const newPass = await promptForInput(
-                                    `Reset password for ${account.email}`,
-                                    "Enter new password",
-                                  );
-                                  if (!newPass) return;
-
-                                  try {
-                                    const {
-                                      data: { session },
-                                    } = await supabase.auth.getSession();
-
-                                    if (!session?.access_token) {
-                                      setMessage(
-                                        "Manager session missing. Please Login again.",
-                                      );
-                                      return;
-                                    }
-
-                                    const payload = {
-                                      email: account.email,
-                                      password: newPass,
-                                    };
-
-                                    const res = await supabase.functions.invoke(
-                                      "reset-sa-password",
-                                      {
-                                        body: payload,
-                                        headers: {
-                                          Authorization: `Bearer ${session.access_token}`,
-                                        },
-                                      },
-                                    );
-
-                                    if (res.error) {
-                                      const host = new URL(SUPABASE_URL).host;
-                                      const projectRef = host.split(".")[0];
-                                      const fnUrl = projectRef
-                                        ? `https://${projectRef}.functions.supabase.co/reset-sa-password`
-                                        : null;
-                                      if (!fnUrl)
-                                        throw new Error(
-                                          res.error.message ||
-                                            "Function invoke failed",
-                                        );
-
-                                      const fallback = await fetch(fnUrl, {
-                                        method: "POST",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                          Authorization: `Bearer ${session.access_token}`,
-                                        },
-                                        body: JSON.stringify(payload),
-                                      });
-
-                                      if (!fallback.ok) {
-                                        const txt = await fallback.text();
-                                        throw new Error(
-                                          `HTTP ${fallback.status}: ${txt}`,
-                                        );
-                                      }
-                                    }
-
-                                    setMessage("Password reset.");
-                                    await loadAccounts();
-                                  } catch (err: any) {
-                                    setMessage(
-                                      err?.message ||
-                                        "Failed to reset password. Ensure reset function is deployed.",
-                                    );
-                                  }
-                                }}
-                              >
-                                <Text style={styles.menuText}>
-                                  Reset Password
-                                </Text>
-                              </Pressable>
-
-                              <Pressable
-                                style={styles.menuItem}
-                                onPress={() => {
-                                  setOpenMenuFor(null);
-                                  onDeleteSAAccount(account.email);
-                                }}
-                              >
-                                <Text
-                                  style={[
-                                    styles.menuText,
-                                    { color: "#FFB3A0" },
-                                  ]}
-                                >
-                                  Delete Account
-                                </Text>
-                              </Pressable>
-                            </View>
-                          ) : null}
-                        </View>
-                      </View>
-                    );
-                  })
+                  saOnlyAccounts.map((account, idx) =>
+                    renderAccountRow(
+                      account,
+                      idx === saOnlyAccounts.length - 1,
+                      "SA ID",
+                      (account.email || account.name || account.id).split(
+                        "@",
+                      )[0],
+                    ),
+                  )
                 )}
               </View>
 
@@ -455,6 +475,102 @@ export default function AdminDashboard() {
                 disabled={checkingAuth || !isManagerSession}
               >
                 <Text style={styles.buttonText}>Create SA Account</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Manager Account Management</Text>
+
+              <Text style={styles.listHeading}>Active Manager Accounts</Text>
+              <View style={styles.listWrapper}>
+                {loadingAccounts ? (
+                  <ActivityIndicator color="#D1DCF3" />
+                ) : managerAccounts.length === 0 ? (
+                  <Text style={styles.row}>No manager accounts found.</Text>
+                ) : (
+                  managerAccounts.map((account, idx) =>
+                    renderAccountRow(
+                      account,
+                      idx === managerAccounts.length - 1,
+                      "Manager Email",
+                      account.email,
+                      account.name && account.name !== account.email
+                        ? account.name
+                        : undefined,
+                    ),
+                  )
+                )}
+              </View>
+
+              <Pressable
+                style={[styles.primaryButton, { marginTop: 12 }]}
+                onPress={() => router.push("/admin/settings/create-manager")}
+                disabled={checkingAuth || !isManagerSession}
+              >
+                <Text style={styles.buttonText}>Create Manager Account</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Blocked Plate Numbers</Text>
+              <Text style={styles.rowMuted}>
+                {loadingBlockedPlateCount
+                  ? "Loading…"
+                  : `${blockedPlateCount} plate${blockedPlateCount === 1 ? "" : "s"} blocked`}
+              </Text>
+
+              <Pressable
+                style={[styles.primaryButton, { marginTop: 12 }]}
+                onPress={() => router.push("/admin/settings/blocked-plates")}
+                disabled={checkingAuth || !isManagerSession}
+              >
+                <Text style={styles.buttonText}>Manage Blocked Plates</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Charging Bays</Text>
+              <Text style={styles.rowMuted}>
+                {bays.length} bay{bays.length === 1 ? "" : "s"} •{" "}
+                {bays.filter((b) => b.enabled).length} enabled
+              </Text>
+
+              <Pressable
+                style={[styles.primaryButton, { marginTop: 12 }]}
+                onPress={() => router.push("/admin/settings/bays")}
+                disabled={checkingAuth || !isManagerSession}
+              >
+                <Text style={styles.buttonText}>Manage Bays</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Terms & Conditions</Text>
+              <Text style={styles.rowMuted}>
+                Shown to customers on the Join Queue screen.
+              </Text>
+
+              <Pressable
+                style={[styles.primaryButton, { marginTop: 12 }]}
+                onPress={() => router.push("/admin/settings/terms")}
+                disabled={checkingAuth || !isManagerSession}
+              >
+                <Text style={styles.buttonText}>Edit Terms & Conditions</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Activity Log</Text>
+              <Text style={styles.rowMuted}>
+                Every customer, SA, and manager action.
+              </Text>
+
+              <Pressable
+                style={[styles.primaryButton, { marginTop: 12 }]}
+                onPress={() => router.push("/admin/settings/logs")}
+                disabled={checkingAuth || !isManagerSession}
+              >
+                <Text style={styles.buttonText}>View Activity Log</Text>
               </Pressable>
             </View>
 
@@ -469,6 +585,10 @@ export default function AdminDashboard() {
                     Lat: {showroomLat || "—"} • Lng: {showroomLng || "—"}
                   </Text>
                   <Text style={styles.rowMuted}>Radius: {gpsRadiusM} m</Text>
+                  <Text style={styles.rowMuted}>
+                    Charging Timer: {chargingMinutes} min | Grace Period:{" "}
+                    {graceMinutes} min
+                  </Text>
                 </>
               )}
 
@@ -512,6 +632,13 @@ export default function AdminDashboard() {
                     if (error) {
                       setGpsTestEnabled(previous);
                       setMessage(error.message);
+                    } else {
+                      void logActivity({
+                        action: "showroom_settings.toggle_gps_test",
+                        targetType: "showroom_settings",
+                        targetId: "main",
+                        details: { enabled: v },
+                      });
                     }
                   }}
                   disabled={checkingAuth || !isManagerSession}
@@ -533,11 +660,23 @@ export default function AdminDashboard() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>SA Credentials</Text>
+            <Text style={styles.modalTitle}>
+              {modalAccount?.role === "manager" || modalAccount?.role === "admin"
+                ? "Manager Credentials"
+                : "SA Credentials"}
+            </Text>
             <Text style={styles.modalLine} selectable>
-              <Text style={styles.modalLabelInline}>SA ID: </Text>
+              <Text style={styles.modalLabelInline}>
+                {modalAccount?.role === "manager" || modalAccount?.role === "admin"
+                  ? "Manager Email: "
+                  : "SA ID: "}
+              </Text>
               <Text style={styles.modalValueInline}>
-                {modalAccount ? modalAccount.email.split("@")[0] : "—"}
+                {modalAccount
+                  ? modalAccount.role === "manager" || modalAccount.role === "admin"
+                    ? modalAccount.email
+                    : modalAccount.email.split("@")[0]
+                  : "—"}
               </Text>
             </Text>
 
@@ -563,10 +702,16 @@ export default function AdminDashboard() {
                 ]}
                 accessibilityLabel="Copy credentials"
                 onPress={async () => {
-                  const saId = modalAccount?.email.split("@")[0] ?? "";
+                  const isManagerAccount =
+                    modalAccount?.role === "manager" ||
+                    modalAccount?.role === "admin";
+                  const idLabel = isManagerAccount ? "Manager Email" : "SA ID";
+                  const saId = isManagerAccount
+                    ? modalAccount?.email ?? ""
+                    : modalAccount?.email.split("@")[0] ?? "";
                   const pw = modalAccount?.password_plaintext ?? "";
                   const textToCopy =
-                    saId || pw ? `SA ID: ${saId}\nPassword: ${pw}` : "";
+                    saId || pw ? `${idLabel}: ${saId}\nPassword: ${pw}` : "";
 
                   try {
                     if (

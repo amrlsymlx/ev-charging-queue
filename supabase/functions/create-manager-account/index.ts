@@ -1,13 +1,17 @@
-// Supabase Edge Function: delete-sa-account
-// Deletes an SA user's Supabase Auth account and its sa_users row using the
-// service role key. Deleting only the sa_users row (as the client previously
-// did) left the Auth user behind, letting the SA still log in.
+// Supabase Edge Function: create-manager-account
+// Invites a new Manager via Supabase Auth's inviteUserByEmail — unlike SA
+// accounts, manager accounts require email verification. The invited
+// manager receives an email with a link to confirm their address and set
+// their own password; no password is set or seen by the inviting manager.
+// Requires SUPABASE_SERVICE_ROLE_KEY to be set as a function secret (never
+// exposed to the client app).
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
+// Allow calls from the Expo web dev server / any origin (mobile clients ignore CORS).
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -57,47 +61,47 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { email } = await req.json();
+    const { email, name } = await req.json();
 
     if (!email) {
-      return new Response(JSON.stringify({ error: "email is required." }), {
-        status: 400,
-        headers: corsHeaders,
-      });
-    }
-
-    // Find the user by email using the Admin API.
-    let userId: string | null = null;
-
-    try {
-      const listRes = await adminClient.auth.admin.listUsers();
-      const users = listRes?.data?.users || [];
-      const match = users.find(
-        (u: any) => (u.email || "").toLowerCase() === email.toLowerCase(),
+      return new Response(
+        JSON.stringify({ error: "email is required." }),
+        { status: 400, headers: corsHeaders },
       );
-      if (match) userId = match.id;
-    } catch (e) {
-      // ignore and fall through to "not found" handling below
     }
 
-    if (userId) {
-      const { error: deleteAuthError } =
-        await adminClient.auth.admin.deleteUser(userId);
-      if (deleteAuthError) {
-        return new Response(
-          JSON.stringify({ error: deleteAuthError.message }),
-          { status: 500, headers: corsHeaders },
-        );
-      }
+    const { data: created, error: createError } =
+      await adminClient.auth.admin.inviteUserByEmail(email, {
+        data: { role: "manager", name: name || email },
+      });
+
+    if (createError || !created.user) {
+      return new Response(
+        JSON.stringify({
+          error: createError?.message || "Failed to invite manager account.",
+        }),
+        { status: 400, headers: corsHeaders },
+      );
     }
 
-    const { error: deleteRowError } = await adminClient
+    const { error: upsertError } = await adminClient
       .from("sa_users")
-      .delete()
-      .eq("email", email);
+      .upsert(
+        [
+          {
+            name: name || email,
+            email,
+            role: "manager",
+            password_plaintext: null,
+          },
+        ],
+        {
+          onConflict: "email",
+        },
+      );
 
-    if (deleteRowError) {
-      return new Response(JSON.stringify({ error: deleteRowError.message }), {
+    if (upsertError) {
+      return new Response(JSON.stringify({ error: upsertError.message }), {
         status: 400,
         headers: corsHeaders,
       });
@@ -107,10 +111,10 @@ Deno.serve(async (req) => {
       {
         actor_role: "manager",
         actor_name: caller.email,
-        action: "account.delete",
-        target_type: "user_account",
-        target_id: email,
-        details: { email },
+        action: "manager_account.invite",
+        target_type: "sa_user",
+        target_id: created.user.id,
+        details: { email, name: name || email },
       },
     ]);
 

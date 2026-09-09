@@ -143,11 +143,33 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Keep the manager-visible plaintext copy in sync with the new password.
+    // Keep the manager-visible plaintext copy in sync with the new password —
+    // but never for manager/admin accounts, so managers can't read each
+    // other's passwords via the "View Password" action.
+    const { data: targetRow } = await adminClient
+      .from("sa_users")
+      .select("role")
+      .eq("email", email)
+      .maybeSingle();
+
+    const isManagerAccount =
+      targetRow?.role === "manager" || targetRow?.role === "admin";
+
     await adminClient
       .from("sa_users")
-      .update({ password_plaintext: password })
+      .update({ password_plaintext: isManagerAccount ? null : password })
       .eq("email", email);
+
+    await adminClient.from("activity_logs").insert([
+      {
+        actor_role: "manager",
+        actor_name: caller.email,
+        action: "account.reset_password",
+        target_type: "user_account",
+        target_id: email,
+        details: { email },
+      },
+    ]);
 
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,

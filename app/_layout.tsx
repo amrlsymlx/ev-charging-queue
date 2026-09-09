@@ -33,8 +33,28 @@ export default function RootLayout() {
         <Stack.Screen name="sa/dashboard" options={{ title: "Dashboard" }} />
         <Stack.Screen name="admin/login" options={{ title: "Manager Login" }} />
         <Stack.Screen
+          name="admin/reset-password"
+          options={{ title: "Reset Password" }}
+        />
+        <Stack.Screen
           name="admin/dashboard"
           options={{ title: "Manager Dashboard" }}
+        />
+        <Stack.Screen
+          name="admin/settings/blocked-plates"
+          options={{ title: "Blocked Plate Numbers" }}
+        />
+        <Stack.Screen
+          name="admin/settings/bays"
+          options={{ title: "Charging Bays" }}
+        />
+        <Stack.Screen
+          name="admin/settings/terms"
+          options={{ title: "Terms & Conditions" }}
+        />
+        <Stack.Screen
+          name="admin/settings/logs"
+          options={{ title: "Activity Log" }}
         />
       </Stack>
     </QueueProvider>

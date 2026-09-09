@@ -11,10 +11,14 @@ export type ChargingSessionStatus = "active" | "completed" | "cancelled";
 
 export type UserRole = "sa" | "admin";
 
+export type StaffPlateCategory = "INTERNAL" | "PRIORITY" | "DELIVERY" | "SERVICE";
+
 export interface ChargingBay {
   id: string;
   name: string;
   status: ChargingBayStatus;
+  enabled: boolean;
+  disabledReason?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -31,6 +35,7 @@ export interface QueueEntry {
   gpsOverrideRequested: boolean;
   gpsOverrideApproved: boolean;
   bayId?: string;
+  overrideChargingMinutes?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -65,4 +70,11 @@ export interface NewQueueEntryInput {
   batteryPercentage: number;
   gpsValidated: boolean;
   gpsOverrideRequested: boolean;
+}
+
+export interface NewStaffQueueEntryInput {
+  category: StaffPlateCategory;
+  note: string;
+  batteryPercentage: number;
+  overrideChargingMinutes?: number;
 }

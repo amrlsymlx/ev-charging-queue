@@ -72,7 +72,7 @@ export default function SALoginScreen() {
     if (!saAccount) {
       await supabase.auth.signOut();
       setMessage(
-        "This SA account is not active. Ask manager to create or re-enable your account.",
+        "Invalid SA account. Please contact manager for support.",
       );
       setLoading(false);
       return;

@@ -108,6 +108,19 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Only managers reach this point — the role check above already
+    // rejected anyone else.
+    await adminClient.from("activity_logs").insert([
+      {
+        actor_role: "manager",
+        actor_name: caller.email,
+        action: "sa_account.create",
+        target_type: "sa_user",
+        target_id: created.user.id,
+        details: { email, name: name || email },
+      },
+    ]);
+
     return new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: corsHeaders,

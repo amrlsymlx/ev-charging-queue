@@ -97,6 +97,7 @@ export default function CustomerJoinScreen() {
   );
   const [gpsLimitMeters, setGpsLimitMeters] = useState(50);
   const [loadingSettings, setLoadingSettings] = useState(true);
+  const [termsText, setTermsText] = useState("");
 
   const [message, setMessage] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
@@ -126,6 +127,7 @@ export default function CustomerJoinScreen() {
         setShowroomLongitude(data.longitude ?? null);
         setGpsLimitMeters(data.gps_radius_m ?? 50);
         setGpsTestEnabled(data.gps_test_enabled ?? true);
+        setTermsText(data.terms_and_conditions || "");
       }
 
       setLoadingSettings(false);
@@ -276,6 +278,25 @@ export default function CustomerJoinScreen() {
       return;
     }
 
+    const { data: isBlocked, error: blockedCheckError } = await supabase.rpc(
+      "is_plate_blocked",
+      { plate: formattedPlate || formatPlateNumber(plateNumber) },
+    );
+
+    if (blockedCheckError) {
+      setMessage(blockedCheckError.message);
+      return;
+    }
+
+    if (isBlocked) {
+      const blockedPlate = formattedPlate || formatPlateNumber(plateNumber);
+      showAlert(
+        "Plate blocked",
+        `${blockedPlate}\n\nThis plate number is blocked from using our charger due violation of our T&C.`,
+      );
+      return;
+    }
+
     if (Number.isNaN(battery)) {
       setMessage("Please enter a valid battery percentage.");
       return;
@@ -331,7 +352,16 @@ export default function CustomerJoinScreen() {
         params: { id: entry.id },
       });
     } catch (err: any) {
-      setMessage(err?.message || "Failed to join queue. Please try again.");
+      const rawMessage = err?.message || "Failed to join queue. Please try again.";
+      if (rawMessage.includes("PLATE_BLOCKED")) {
+        const blockedPlate = formattedPlate || formatPlateNumber(plateNumber);
+        showAlert(
+          "Plate blocked",
+          `${blockedPlate}\n\nThis plate number is blocked from using our charger due violation of our T&C.`,
+        );
+      } else {
+        setMessage(rawMessage);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -626,14 +656,7 @@ export default function CustomerJoinScreen() {
             <Text style={styles.termsTitle}>Terms & Conditions</Text>
             <ScrollView style={styles.termsContent}>
               <Text style={styles.termsText}>
-                By joining the queue you agree to follow the showroom's
-                instructions, allow SA personnel to inspect and handle your
-                vehicle, and accept that any service actions are performed at
-                your own risk. This is a sample terms text — replace with the
-                real policy.
-              </Text>
-              <Text style={[styles.termsText, { marginTop: 8 }]}>
-                Further provisions can be added here.
+                {termsText || "Terms & Conditions have not been set yet."}
               </Text>
             </ScrollView>
 

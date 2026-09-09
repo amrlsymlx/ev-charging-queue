@@ -8,12 +8,14 @@ import {
     useState,
 } from "react";
 
+import { logActivity } from "@/lib/activityLog";
 import { getRemainingSeconds } from "@/lib/eta";
 import { supabase } from "@/lib/supabase";
 import {
     ChargingBay,
     ChargingSession,
     NewQueueEntryInput,
+    NewStaffQueueEntryInput,
     QueueEntry,
     SAUser,
 } from "@/types/domain";
@@ -26,7 +28,9 @@ interface QueueContextValue {
   waitingEntries: QueueEntry[];
   activeSessions: ChargingSession[];
   pendingOverrideEntries: QueueEntry[];
+  defaultChargingMinutes: number;
   addQueueEntry: (input: NewQueueEntryInput) => Promise<QueueEntry>;
+  addStaffQueueEntry: (input: NewStaffQueueEntryInput) => Promise<QueueEntry>;
   getQueueEntryById: (entryId: string) => QueueEntry | undefined;
   findLatestEntryByPlate: (plateNumber: string) => QueueEntry | undefined;
   getQueuePosition: (entryId: string) => number | null;
@@ -38,10 +42,17 @@ interface QueueContextValue {
     saName: string,
   ) => Promise<boolean>;
   endCharging: (sessionId: string) => Promise<boolean>;
-  skipQueueEntry: (entryId: string) => Promise<void>;
   removeQueueEntry: (entryId: string) => Promise<void>;
   approveOverride: (entryId: string) => Promise<void>;
   rejectOverride: (entryId: string) => Promise<void>;
+  addBay: (name: string) => Promise<void>;
+  renameBay: (bayId: string, name: string) => Promise<void>;
+  deleteBay: (bayId: string) => Promise<void>;
+  setBayEnabled: (
+    bayId: string,
+    enabled: boolean,
+    reason?: string,
+  ) => Promise<void>;
 }
 
 const QueueContext = createContext<QueueContextValue | null>(null);
@@ -61,6 +72,8 @@ function mapBay(row: any): ChargingBay {
     id: row.id,
     name: row.name,
     status: row.status,
+    enabled: row.enabled ?? true,
+    disabledReason: row.disabled_reason ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -79,6 +92,7 @@ function mapQueueEntry(row: any): QueueEntry {
     gpsOverrideRequested: row.gps_override_requested,
     gpsOverrideApproved: row.gps_override_approved,
     bayId: row.bay_id ?? undefined,
+    overrideChargingMinutes: row.override_charging_minutes ?? undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -108,9 +122,27 @@ export function QueueProvider({ children }: PropsWithChildren) {
     [],
   );
   const [isStaff, setIsStaff] = useState(false);
+  const [graceMinutes, setGraceMinutes] = useState(GRACE_MINUTES);
+  const [chargingMinutes, setChargingMinutes] = useState(CHARGING_MINUTES);
 
   const isStaffRef = useRef(isStaff);
   isStaffRef.current = isStaff;
+
+  const loadTimerSettings = async () => {
+    const { data, error } = await supabase
+      .from("showroom_settings")
+      .select("grace_minutes, charging_minutes")
+      .eq("id", "main")
+      .maybeSingle();
+    if (!error && data) {
+      if (typeof data.grace_minutes === "number") {
+        setGraceMinutes(data.grace_minutes);
+      }
+      if (typeof data.charging_minutes === "number") {
+        setChargingMinutes(data.charging_minutes);
+      }
+    }
+  };
 
   const loadBays = async () => {
     const { data, error } = await supabase
@@ -165,6 +197,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
     loadBays();
     loadChargingSessions();
     loadQueueEntries();
+    loadTimerSettings();
 
     const baysChannel = supabase
       .channel("public:bays")
@@ -172,6 +205,15 @@ export function QueueProvider({ children }: PropsWithChildren) {
         "postgres_changes",
         { event: "*", schema: "public", table: "bays" },
         () => loadBays(),
+      )
+      .subscribe();
+
+    const showroomSettingsChannel = supabase
+      .channel("public:showroom_settings")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "showroom_settings" },
+        () => loadTimerSettings(),
       )
       .subscribe();
 
@@ -197,6 +239,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
     return () => {
       supabase.removeChannel(baysChannel);
       supabase.removeChannel(sessionsChannel);
+      supabase.removeChannel(showroomSettingsChannel);
       clearInterval(interval);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -263,6 +306,68 @@ export function QueueProvider({ children }: PropsWithChildren) {
 
     const entry = mapQueueEntry(data);
     setQueueEntries((prev) => [...prev, entry]);
+
+    void logActivity({
+      action: "queue.join",
+      actorRole: "customer",
+      actorName: input.name,
+      targetType: "queue_entry",
+      targetId: entry.id,
+      details: {
+        plateNumber: entry.plateNumber,
+        gpsValidated: entry.gpsValidated,
+        gpsOverrideRequested: entry.gpsOverrideRequested,
+      },
+    });
+
+    return entry;
+  };
+
+  // SA-created entries for internal/priority/delivery/service vehicles —
+  // skips the customer GPS flow entirely (staff are on-site by definition)
+  // and lets the SA set a per-entry charging-time override up front.
+  const addStaffQueueEntry = async (
+    input: NewStaffQueueEntryInput,
+  ): Promise<QueueEntry> => {
+    const timestamp = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from("queue_entries")
+      .insert([
+        {
+          name: input.note.trim() || input.category,
+          phone_number: "-",
+          plate_number: input.category,
+          battery_percentage: input.batteryPercentage,
+          joined_at: timestamp,
+          status: "waiting",
+          gps_validated: true,
+          gps_override_requested: false,
+          gps_override_approved: true,
+          override_charging_minutes: input.overrideChargingMinutes ?? null,
+        },
+      ])
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      throw new Error(error?.message || "Failed to add queue entry.");
+    }
+
+    const entry = mapQueueEntry(data);
+    setQueueEntries((prev) => [...prev, entry]);
+
+    void logActivity({
+      action: "queue.staff_add",
+      targetType: "queue_entry",
+      targetId: entry.id,
+      details: {
+        category: input.category,
+        note: input.note,
+        overrideChargingMinutes: input.overrideChargingMinutes,
+      },
+    });
+
     return entry;
   };
 
@@ -289,30 +394,54 @@ export function QueueProvider({ children }: PropsWithChildren) {
   // person ahead of them occupying the bay they were assigned to for a full
   // grace+charging slot.
   const getEtaForPosition = (position: number) => {
-    if (position < 1 || bays.length === 0) {
+    const enabledBays = bays.filter((bay) => bay.enabled);
+
+    if (position < 1 || enabledBays.length === 0) {
       return 0;
     }
 
     const activeSessionByBay = new Map(
       activeSessions.map((session) => [session.bayId, session]),
     );
-    const slotSeconds = (GRACE_MINUTES + CHARGING_MINUTES) * 60;
 
-    const freeTimes = bays.map((bay) => {
-      const session = activeSessionByBay.get(bay.id);
-      if (!session?.startedAt) return 0;
-      return getRemainingSeconds(session.startedAt, session.plannedDurationMinutes);
-    });
+    const freeTimes = enabledBays
+      .map((bay) => {
+        const session = activeSessionByBay.get(bay.id);
+        if (!session?.startedAt) return 0;
+        return getRemainingSeconds(session.startedAt, session.plannedDurationMinutes);
+      })
+      .sort((a, b) => a - b);
 
-    for (let i = 0; i < position - 1; i++) {
-      let minIndex = 0;
-      for (let j = 1; j < freeTimes.length; j++) {
-        if (freeTimes[j] < freeTimes[minIndex]) minIndex = j;
-      }
-      freeTimes[minIndex] += slotSeconds;
+    // Round-robin across the sorted free times: the first `bayCount`
+    // positions are served by each bay's own current free time (soonest to
+    // latest); position `bayCount + k` reuses the same bay as position `k`,
+    // one full default slot later. Picking whichever bay is momentarily
+    // soonest at each step (instead of this fixed pairing) would let an
+    // unusually short-remaining bay get "recycled" ahead of a bay that's
+    // merely running an unusually long session — e.g. it would place
+    // position 2 on bay 1's *next* slot instead of bay 2's current one,
+    // even though bay 2 frees first.
+    const bayCount = freeTimes.length;
+    const lane = (position - 1) % bayCount;
+    const cycleCount = Math.floor((position - 1) / bayCount);
+
+    let eta = freeTimes[lane];
+
+    // Every earlier cycle on this same lane is occupied by whichever
+    // waiting-queue entry actually holds that queue position — its own
+    // charging-time override (if the SA set one), not the global default,
+    // is how long the bay stays busy before the next entry in this lane
+    // can start. Using the global default here would, e.g., free a bay
+    // "early" for a later position even though the entry ahead of it in
+    // the same lane is a 300-minute override that hasn't started yet.
+    for (let cycle = 0; cycle < cycleCount; cycle++) {
+      const laneQueuePosition = lane + 1 + cycle * bayCount;
+      const laneEntry = waitingEntries[laneQueuePosition - 1];
+      const laneChargingMinutes = laneEntry?.overrideChargingMinutes ?? chargingMinutes;
+      eta += (graceMinutes + laneChargingMinutes) * 60;
     }
 
-    return Math.min(...freeTimes);
+    return eta;
   };
 
   const getEtaForEntry = (entryId: string) => {
@@ -331,7 +460,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
     const entry = queueEntries.find((current) => current.id === entryId);
     const bay = bays.find((current) => current.id === bayId);
 
-    if (!entry || !bay || bay.status !== "available") {
+    if (!entry || !bay || bay.status !== "available" || !bay.enabled) {
       return false;
     }
 
@@ -343,6 +472,8 @@ export function QueueProvider({ children }: PropsWithChildren) {
     }
 
     const timestamp = new Date().toISOString();
+    const effectiveChargingMinutes =
+      entry.overrideChargingMinutes ?? chargingMinutes;
 
     const { error: entryError } = await supabase
       .from("queue_entries")
@@ -365,9 +496,9 @@ export function QueueProvider({ children }: PropsWithChildren) {
           queue_entry_id: entryId,
           bay_id: bayId,
           sa_name: saName,
-          grace_minutes: GRACE_MINUTES,
-          charging_minutes: CHARGING_MINUTES,
-          planned_duration_minutes: GRACE_MINUTES + CHARGING_MINUTES,
+          grace_minutes: graceMinutes,
+          charging_minutes: effectiveChargingMinutes,
+          planned_duration_minutes: graceMinutes + effectiveChargingMinutes,
           status: "active",
           started_at: timestamp,
         },
@@ -376,6 +507,18 @@ export function QueueProvider({ children }: PropsWithChildren) {
     if (sessionError) return false;
 
     await Promise.all([loadQueueEntries(), loadBays(), loadChargingSessions()]);
+
+    void logActivity({
+      action: "session.start",
+      actorName: saName,
+      targetType: "queue_entry",
+      targetId: entryId,
+      details: {
+        bayId,
+        plateNumber: entry.plateNumber,
+        chargingMinutes: effectiveChargingMinutes,
+      },
+    });
 
     return true;
   };
@@ -418,16 +561,15 @@ export function QueueProvider({ children }: PropsWithChildren) {
 
     await Promise.all([loadQueueEntries(), loadBays(), loadChargingSessions()]);
 
-    return true;
-  };
+    void logActivity({
+      action: "session.end",
+      actorName: session.saName,
+      targetType: "charging_session",
+      targetId: sessionId,
+      details: { bayId: session.bayId, actualDurationMinutes },
+    });
 
-  const skipQueueEntry = async (entryId: string) => {
-    const timestamp = new Date().toISOString();
-    const { error } = await supabase
-      .from("queue_entries")
-      .update({ status: "skipped", updated_at: timestamp })
-      .eq("id", entryId);
-    if (!error) await loadQueueEntries();
+    return true;
   };
 
   const removeQueueEntry = async (entryId: string) => {
@@ -436,7 +578,14 @@ export function QueueProvider({ children }: PropsWithChildren) {
       .from("queue_entries")
       .update({ status: "cancelled", updated_at: timestamp })
       .eq("id", entryId);
-    if (!error) await loadQueueEntries();
+    if (!error) {
+      await loadQueueEntries();
+      void logActivity({
+        action: "queue.cancel",
+        targetType: "queue_entry",
+        targetId: entryId,
+      });
+    }
   };
 
   const approveOverride = async (entryId: string) => {
@@ -449,7 +598,14 @@ export function QueueProvider({ children }: PropsWithChildren) {
         updated_at: timestamp,
       })
       .eq("id", entryId);
-    if (!error) await loadQueueEntries();
+    if (!error) {
+      await loadQueueEntries();
+      void logActivity({
+        action: "queue.override_approve",
+        targetType: "queue_entry",
+        targetId: entryId,
+      });
+    }
   };
 
   const rejectOverride = async (entryId: string) => {
@@ -463,7 +619,107 @@ export function QueueProvider({ children }: PropsWithChildren) {
         updated_at: timestamp,
       })
       .eq("id", entryId);
-    if (!error) await loadQueueEntries();
+    if (!error) {
+      await loadQueueEntries();
+      void logActivity({
+        action: "queue.override_reject",
+        targetType: "queue_entry",
+        targetId: entryId,
+      });
+    }
+  };
+
+  const addBay = async (name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new Error("Bay name is required.");
+
+    const slug = trimmedName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "");
+    const id = `bay-${slug || "unnamed"}-${Date.now().toString(36)}`;
+
+    const { error } = await supabase.from("bays").insert([
+      {
+        id,
+        name: trimmedName,
+        status: "available",
+        enabled: true,
+      },
+    ]);
+
+    if (error) throw new Error(error.message || "Failed to add bay.");
+    await loadBays();
+    void logActivity({
+      action: "bay.create",
+      targetType: "bay",
+      targetId: id,
+      details: { name: trimmedName },
+    });
+  };
+
+  const renameBay = async (bayId: string, name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new Error("Bay name is required.");
+
+    const { error } = await supabase
+      .from("bays")
+      .update({ name: trimmedName, updated_at: new Date().toISOString() })
+      .eq("id", bayId);
+
+    if (error) throw new Error(error.message || "Failed to rename bay.");
+    await loadBays();
+    void logActivity({
+      action: "bay.rename",
+      targetType: "bay",
+      targetId: bayId,
+      details: { name: trimmedName },
+    });
+  };
+
+  const setBayEnabled = async (
+    bayId: string,
+    enabled: boolean,
+    reason?: string,
+  ) => {
+    const { error } = await supabase
+      .from("bays")
+      .update({
+        enabled,
+        disabled_reason: enabled ? null : reason || "Unspecified",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", bayId);
+
+    if (error) throw new Error(error.message || "Failed to update bay.");
+    await loadBays();
+    void logActivity({
+      action: enabled ? "bay.enable" : "bay.disable",
+      targetType: "bay",
+      targetId: bayId,
+      details: enabled ? undefined : { reason: reason || "Unspecified" },
+    });
+  };
+
+  const deleteBay = async (bayId: string) => {
+    const { error } = await supabase.from("bays").delete().eq("id", bayId);
+
+    if (error) {
+      // Postgres FK violation: this bay has queue/session history referencing it.
+      if (error.code === "23503") {
+        throw new Error(
+          "This bay has queue or charging history and can't be deleted. Disable it instead.",
+        );
+      }
+      throw new Error(error.message || "Failed to delete bay.");
+    }
+
+    await loadBays();
+    void logActivity({
+      action: "bay.delete",
+      targetType: "bay",
+      targetId: bayId,
+    });
   };
 
   const value: QueueContextValue = {
@@ -474,7 +730,9 @@ export function QueueProvider({ children }: PropsWithChildren) {
     waitingEntries,
     activeSessions,
     pendingOverrideEntries,
+    defaultChargingMinutes: chargingMinutes,
     addQueueEntry,
+    addStaffQueueEntry,
     getQueueEntryById,
     findLatestEntryByPlate,
     getQueuePosition,
@@ -482,10 +740,13 @@ export function QueueProvider({ children }: PropsWithChildren) {
     getEtaForPosition,
     startCharging,
     endCharging,
-    skipQueueEntry,
     removeQueueEntry,
     approveOverride,
     rejectOverride,
+    addBay,
+    renameBay,
+    deleteBay,
+    setBayEnabled,
   };
 
   return (

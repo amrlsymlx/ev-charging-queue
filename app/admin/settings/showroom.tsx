@@ -1,3 +1,4 @@
+import { logActivity } from "@/lib/activityLog";
 import { GeocodeResult, searchAddress } from "@/lib/geocode";
 import { supabase } from "@/lib/supabase";
 import * as Linking from "expo-linking";
@@ -130,6 +131,8 @@ export default function ShowroomSettingsScreen() {
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
   const [radius, setRadius] = useState("50");
+  const [graceMinutes, setGraceMinutes] = useState("5");
+  const [chargingMinutes, setChargingMinutes] = useState("60");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -153,7 +156,9 @@ export default function ShowroomSettingsScreen() {
     setLoading(true);
     const { data } = await supabase
       .from("showroom_settings")
-      .select("showroom_name, latitude, longitude, gps_radius_m")
+      .select(
+        "showroom_name, latitude, longitude, gps_radius_m, grace_minutes, charging_minutes",
+      )
       .eq("id", "main")
       .maybeSingle();
 
@@ -162,6 +167,8 @@ export default function ShowroomSettingsScreen() {
       setLat(String(data.latitude ?? ""));
       setLng(String(data.longitude ?? ""));
       setRadius(String(data.gps_radius_m ?? 50));
+      setGraceMinutes(String(data.grace_minutes ?? 5));
+      setChargingMinutes(String(data.charging_minutes ?? 60));
     }
 
     setLoading(false);
@@ -224,6 +231,19 @@ export default function ShowroomSettingsScreen() {
   };
 
   const onSave = async () => {
+    const nGraceMinutes = parseInt(graceMinutes || "0", 10);
+    const nChargingMinutes = parseInt(chargingMinutes || "0", 10);
+
+    if (!Number.isFinite(nGraceMinutes) || nGraceMinutes < 1) {
+      setMessage("Grace period must be at least 1 minute.");
+      return;
+    }
+
+    if (!Number.isFinite(nChargingMinutes) || nChargingMinutes < 1) {
+      setMessage("Charging timer must be at least 1 minute.");
+      return;
+    }
+
     setSaving(true);
     setMessage(null);
 
@@ -237,6 +257,8 @@ export default function ShowroomSettingsScreen() {
       latitude: Number.isFinite(nlat) ? nlat : null,
       longitude: Number.isFinite(nlng) ? nlng : null,
       gps_radius_m: nradius,
+      grace_minutes: nGraceMinutes,
+      charging_minutes: nChargingMinutes,
     } as any;
 
     const { error } = await supabase
@@ -248,6 +270,13 @@ export default function ShowroomSettingsScreen() {
       setSaving(false);
       return;
     }
+
+    void logActivity({
+      action: "showroom_settings.update",
+      targetType: "showroom_settings",
+      targetId: "main",
+      details: payload,
+    });
 
     setSaving(false);
     setMessage("Showroom settings saved.");
@@ -264,6 +293,7 @@ export default function ShowroomSettingsScreen() {
             <ActivityIndicator color="#D1DCF3" />
           ) : (
             <>
+              <Text style={styles.fieldLabel}>Showroom Name</Text>
               <TextInput
                 style={styles.input}
                 value={showroomName}
@@ -271,6 +301,8 @@ export default function ShowroomSettingsScreen() {
                 placeholder="Showroom Name"
                 placeholderTextColor="#7E8EA8"
               />
+
+              <Text style={styles.fieldLabel}>Latitude</Text>
               <TextInput
                 style={styles.input}
                 value={lat}
@@ -279,6 +311,8 @@ export default function ShowroomSettingsScreen() {
                 placeholderTextColor="#7E8EA8"
                 keyboardType="decimal-pad"
               />
+
+              <Text style={styles.fieldLabel}>Longitude</Text>
               <TextInput
                 style={styles.input}
                 value={lng}
@@ -287,11 +321,35 @@ export default function ShowroomSettingsScreen() {
                 placeholderTextColor="#7E8EA8"
                 keyboardType="decimal-pad"
               />
+
+              <Text style={styles.fieldLabel}>GPS Radius (meters)</Text>
               <TextInput
                 style={styles.input}
                 value={radius}
                 onChangeText={setRadius}
                 placeholder="GPS Radius (meters)"
+                placeholderTextColor="#7E8EA8"
+                keyboardType="numeric"
+              />
+
+              <Text style={styles.sectionLabel}>Charging Timer</Text>
+
+              <Text style={styles.fieldLabel}>Grace Period (minutes)</Text>
+              <TextInput
+                style={styles.input}
+                value={graceMinutes}
+                onChangeText={setGraceMinutes}
+                placeholder="Grace Period (minutes)"
+                placeholderTextColor="#7E8EA8"
+                keyboardType="numeric"
+              />
+
+              <Text style={styles.fieldLabel}>Charging Duration (minutes)</Text>
+              <TextInput
+                style={styles.input}
+                value={chargingMinutes}
+                onChangeText={setChargingMinutes}
+                placeholder="Charging Duration (minutes)"
                 placeholderTextColor="#7E8EA8"
                 keyboardType="numeric"
               />
@@ -394,6 +452,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   title: { fontSize: 20, color: "#F6FAFF", fontWeight: "700" },
+  sectionLabel: {
+    color: "#9FB0CD",
+    fontWeight: "700",
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  fieldLabel: {
+    color: "#C4D3EE",
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
   input: {
     borderWidth: 0,
     borderColor: "transparent",

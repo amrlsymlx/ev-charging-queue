@@ -23,8 +23,14 @@ import { Ionicons } from "@expo/vector-icons";
 
 export default function PublicBoardScreen() {
   const router = useRouter();
-  const { bays, queueEntries, activeSessions, waitingEntries, getEtaForEntry } =
-    useQueue();
+  const {
+    bays,
+    queueEntries,
+    activeSessions,
+    waitingEntries,
+    getEtaForEntry,
+    getEtaForPosition,
+  } = useQueue();
 
   // Forces a re-render every second so live countdowns stay accurate.
   const [, setTick] = useState(0);
@@ -37,14 +43,33 @@ export default function PublicBoardScreen() {
     activeSessions.map((session) => [session.bayId, session]),
   );
 
+  const estimatedWaitSeconds = (() => {
+    try {
+      const position = waitingEntries.length + 1;
+      return getEtaForPosition(position);
+    } catch {
+      return null;
+    }
+  })();
+
+  const estimatedWait =
+    estimatedWaitSeconds === null ? "--" : formatCountdown(estimatedWaitSeconds);
+  const estimatedStart =
+    estimatedWaitSeconds === null
+      ? "--"
+      : formatClockTime(new Date(Date.now() + estimatedWaitSeconds * 1000));
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.bgGlowOne} />
       <View style={styles.bgGlowTwo} />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.heading}>Live Queue Board</Text>
-        <Text style={styles.subheading}>
-          Charging bay status and current waiting queue.
+        <Text style={[styles.subheading, styles.etaBadge]}>
+          Estimated wait: {estimatedWait}
+          {estimatedStart !== "--"
+            ? ` (Start charging at ${estimatedStart})`
+            : ""}
         </Text>
 
         <View style={styles.sectionCard}>
@@ -72,12 +97,16 @@ export default function PublicBoardScreen() {
                   <Text style={styles.rowTitle}>{bay.name}</Text>
                   <Text
                     style={
-                      bay.status === "available"
-                        ? styles.available
-                        : styles.occupied
+                      !bay.enabled
+                        ? styles.bayDisabled
+                        : bay.status === "available"
+                          ? styles.available
+                          : styles.occupied
                     }
                   >
-                    {bay.status.toUpperCase()}
+                    {!bay.enabled
+                      ? `DISABLED — ${bay.disabledReason || "Unspecified"}`
+                      : bay.status.toUpperCase()}
                   </Text>
                 </View>
 
@@ -86,6 +115,7 @@ export default function PublicBoardScreen() {
                   colorAccent={
                     phaseInfo?.phase === "charging" ? "#3CE685" : "#FFD0A8"
                   }
+                  disabled={!bay.enabled}
                 />
 
                 {activeSession?.startedAt && phaseInfo ? (
@@ -200,10 +230,19 @@ const styles = StyleSheet.create({
     fontSize: 27,
     fontWeight: "800",
     color: "#F4F8FF",
+    textAlign: "center",
   },
   subheading: {
     color: "#C4D3EE",
     marginBottom: 4,
+    textAlign: "center",
+  },
+  etaBadge: {
+    alignSelf: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
   },
   sectionCard: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
@@ -217,6 +256,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: "700",
     color: "#F6FAFF",
+    textAlign: "center",
   },
   rowCard: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
@@ -251,6 +291,10 @@ const styles = StyleSheet.create({
   },
   occupied: {
     color: "#FFD0A8",
+    fontWeight: "700",
+  },
+  bayDisabled: {
+    color: "#FF9B8A",
     fontWeight: "700",
   },
   progressTrack: {
