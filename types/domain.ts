@@ -34,6 +34,7 @@ export interface QueueEntry {
   gpsValidated: boolean;
   gpsOverrideRequested: boolean;
   gpsOverrideApproved: boolean;
+  agreedToTerms: boolean;
   bayId?: string;
   overrideChargingMinutes?: number;
   createdAt: string;
@@ -70,6 +71,7 @@ export interface NewQueueEntryInput {
   batteryPercentage: number;
   gpsValidated: boolean;
   gpsOverrideRequested: boolean;
+  agreedToTerms: boolean;
 }
 
 export interface NewStaffQueueEntryInput {

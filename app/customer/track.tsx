@@ -33,7 +33,9 @@ export default function CustomerTrackScreen() {
   const [message, setMessage] = useState<string | null>(null);
 
   const handleLookup = () => {
-    const entry = findLatestEntryByPlate(lookupPlate);
+    const entry = findLatestEntryByPlate(
+      formattedLookup || formatPlateNumber(lookupPlate),
+    );
 
     if (!entry) {
       setMessage("No queue entry found for that plate number.");

@@ -167,7 +167,7 @@ export default function SAQueuePanel({
   })();
 
   const estimatedWait = rainMode
-    ? "Indefinite"
+    ? "∞"
     : estimatedWaitSeconds === null
       ? "--"
       : formatCountdown(estimatedWaitSeconds);
@@ -189,13 +189,10 @@ export default function SAQueuePanel({
         {estimatedStart !== "--" ? ` (Start charging at ${estimatedStart})` : ""}
       </Text>
 
-      <View style={[styles.sectionCard, styles.rainModeRow]}>
-        <View style={{ flex: 1 }}>
+      <View style={[styles.sectionCard, styles.sectionCardRain, styles.rainModeRow]}>
+        <View style={styles.rainModeTitleRow}>
+          <Ionicons name="thunderstorm-outline" size={18} color="#9FD3FF" />
           <Text style={styles.sectionTitle}>Heavy Rain Mode</Text>
-          <Text style={styles.hint}>
-            Existing charging continues. Queue wait times show as
-            &quot;Indefinite&quot; and bays show rain/thunder.
-          </Text>
         </View>
         <Switch
           value={rainMode}
@@ -204,7 +201,7 @@ export default function SAQueuePanel({
         />
       </View>
 
-      <View style={styles.sectionCard}>
+      <View style={[styles.sectionCard, styles.sectionCardBays]}>
         <Text style={styles.sectionTitle}>Charging Bays</Text>
         {bays.map((bay) => {
           const activeSession = activeSessionByBay.get(bay.id);
@@ -304,7 +301,7 @@ export default function SAQueuePanel({
         })}
       </View>
 
-      <View style={styles.sectionCard}>
+      <View style={[styles.sectionCard, styles.sectionCardQueue]}>
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Waiting Queue</Text>
           <Pressable
@@ -333,7 +330,7 @@ export default function SAQueuePanel({
               </View>
               {rainMode ? (
                 <Text style={[styles.bayMeta, styles.centeredText]}>
-                  ETA Start Charging: Indefinite (Heavy Rain Mode)
+                  ETA Start Charging: ∞ (Heavy Rain Mode)
                 </Text>
               ) : (
                 (() => {
@@ -406,7 +403,7 @@ export default function SAQueuePanel({
         ) : null}
       </View>
 
-      <View style={styles.sectionCard}>
+      <View style={[styles.sectionCard, styles.sectionCardOverride]}>
         <Text style={styles.sectionTitle}>GPS Override Approval</Text>
         {pendingOverrideEntries.length === 0 ? (
           <Text style={styles.bayMeta}>No pending override requests.</Text>
@@ -415,9 +412,8 @@ export default function SAQueuePanel({
         {pendingOverrideEntries.map((entry) => (
           <View key={entry.id} style={styles.queueCard}>
             <PlateBadge plateNumber={entry.plateNumber} />
-            <Text style={styles.bayMeta}>
-              {entry.name} requested GPS override
-            </Text>
+            <ContactBadge phoneNumber={entry.phoneNumber} name={entry.name} />
+            <Text style={styles.bayMeta}>requested GPS override</Text>
 
             <View style={styles.actionRow}>
               <Pressable
@@ -699,6 +695,18 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 8,
   },
+  sectionCardRain: {
+    backgroundColor: "rgba(88, 143, 224, 0.18)",
+  },
+  sectionCardBays: {
+    backgroundColor: "rgba(124, 255, 186, 0.10)",
+  },
+  sectionCardQueue: {
+    backgroundColor: "rgba(255, 208, 168, 0.12)",
+  },
+  sectionCardOverride: {
+    backgroundColor: "rgba(255, 138, 138, 0.12)",
+  },
   sectionTitle: {
     color: "#F6FAFF",
     fontSize: 17,
@@ -709,6 +717,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+  },
+  rainModeTitleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   bayCard: {
     borderRadius: 12,

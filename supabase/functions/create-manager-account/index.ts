@@ -61,7 +61,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { email, name } = await req.json();
+    const { email, name, redirectTo } = await req.json();
 
     if (!email) {
       return new Response(
@@ -70,9 +70,15 @@ Deno.serve(async (req) => {
       );
     }
 
+    // Without an explicit redirectTo, Supabase sends the invitee to the
+    // project's default Site URL, which normally has nothing that reads the
+    // invite's access/refresh tokens from the URL — the invite link would
+    // load but silently do nothing. The client passes the actual app URL
+    // for admin/reset-password.tsx, which does parse and apply those tokens.
     const { data: created, error: createError } =
       await adminClient.auth.admin.inviteUserByEmail(email, {
         data: { role: "manager", name: name || email },
+        ...(redirectTo ? { redirectTo } : {}),
       });
 
     if (createError || !created.user) {

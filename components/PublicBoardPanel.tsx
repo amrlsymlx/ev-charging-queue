@@ -131,7 +131,7 @@ export default function PublicBoardPanel({
   })();
 
   const estimatedWait = rainMode
-    ? "Indefinite"
+    ? "∞"
     : estimatedWaitSeconds === null
       ? "--"
       : formatCountdown(estimatedWaitSeconds);
@@ -155,8 +155,8 @@ export default function PublicBoardPanel({
         <View style={styles.statusBannerRain}>
           <Ionicons name="thunderstorm-outline" size={16} color="#9FD3FF" />
           <Text style={styles.statusBannerTextRain}>
-            Heavy rain mode — charging continues, but wait times are
-            indefinite.
+            Heavy rain — for safety reasons, all queuing charging
+            are unable to start at the moment.
           </Text>
         </View>
       ) : null}
@@ -177,7 +177,7 @@ export default function PublicBoardPanel({
         </View>
       ) : null}
 
-      <View style={styles.sectionCard}>
+      <View style={[styles.sectionCard, styles.sectionCardBays]}>
         <Text style={styles.sectionTitle}>Charging Bays</Text>
         {bays.map((bay) => {
           const activeSession = activeSessionByBay.get(bay.id);
@@ -218,7 +218,7 @@ export default function PublicBoardPanel({
                   }
                 >
                   {!bay.enabled
-                    ? `DISABLED — ${bay.disabledReason || "Unspecified"}`
+                    ? "DISABLED"
                     : isUnavailableAfterHours
                       ? "UNAVAILABLE"
                       : bay.status.toUpperCase()}
@@ -246,7 +246,7 @@ export default function PublicBoardPanel({
                       <PlateBadge
                         plateNumber={chargingEntry?.plateNumber ?? "Unknown"}
                       />
-                      <View style={styles.timerRow}>
+                      <View style={[styles.timerRow, styles.statusLineActive]}>
                         {phase === "charging" ? (
                           <Ionicons
                             name="hourglass-outline"
@@ -279,14 +279,34 @@ export default function PublicBoardPanel({
                   );
                 })()
               ) : (
-                <Text style={styles.rowSub}>Ready for next vehicle</Text>
+                <Text
+                  style={[
+                    styles.rowSub,
+                    styles.rowSubCentered,
+                    !bay.enabled
+                      ? styles.statusLineDisabled
+                      : rainMode
+                        ? styles.statusLineClosed
+                        : isUnavailableAfterHours
+                          ? styles.statusLineClosed
+                          : styles.statusLineReady,
+                  ]}
+                >
+                  {!bay.enabled
+                    ? bay.disabledReason || "Unspecified"
+                    : rainMode
+                      ? "Unable to start charging at the moment."
+                      : isUnavailableAfterHours
+                        ? "Operation Off"
+                        : "Ready for next vehicle"}
+                </Text>
               )}
             </View>
           );
         })}
       </View>
 
-      <View style={styles.sectionCard}>
+      <View style={[styles.sectionCard, styles.sectionCardQueue]}>
         <Text style={styles.sectionTitle}>Waiting Queue</Text>
         {waitingEntries.length === 0 ? (
           <Text style={styles.rowSub}>No one is waiting right now.</Text>
@@ -302,7 +322,7 @@ export default function PublicBoardPanel({
               </View>
               <View style={styles.queueRowRight}>
                 <Text style={styles.queueEta}>
-                  {rainMode ? "Indefinite" : formatCountdown(etaSeconds)}
+                  {rainMode ? "∞" : formatCountdown(etaSeconds)}
                 </Text>
                 {rainMode ? null : (
                   <View style={styles.miniProgressTrack}>
@@ -424,6 +444,12 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 8,
   },
+  sectionCardBays: {
+    backgroundColor: "rgba(124, 255, 186, 0.10)",
+  },
+  sectionCardQueue: {
+    backgroundColor: "rgba(255, 208, 168, 0.12)",
+  },
   sectionTitle: {
     fontSize: 17,
     fontWeight: "700",
@@ -468,6 +494,31 @@ const styles = StyleSheet.create({
   bayDisabled: {
     color: "#FF9B8A",
     fontWeight: "700",
+  },
+  rowSubCentered: {
+    textAlign: "center",
+    width: "100%",
+  },
+  statusLineActive: {
+    backgroundColor: "rgba(255, 208, 90, 0.16)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  statusLineDisabled: {
+    backgroundColor: "rgba(255, 90, 90, 0.16)",
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  statusLineReady: {
+    backgroundColor: "rgba(124, 255, 186, 0.16)",
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  statusLineClosed: {
+    backgroundColor: "rgba(255, 90, 90, 0.16)",
+    paddingVertical: 6,
+    borderRadius: 8,
   },
   bayUnavailable: {
     color: "#9FB0CD",

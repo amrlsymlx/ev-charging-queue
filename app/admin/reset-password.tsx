@@ -34,6 +34,7 @@ export default function AdminResetPasswordScreen() {
   const router = useRouter();
   const [sessionReady, setSessionReady] = useState(false);
   const [checking, setChecking] = useState(true);
+  const [isInvite, setIsInvite] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
@@ -44,8 +45,10 @@ export default function AdminResetPasswordScreen() {
       try {
         const currentUrl =
           typeof window !== "undefined" ? window.location.href : "";
-        const { accessToken, refreshToken, error } =
+        const { accessToken, refreshToken, type, error } =
           parseAuthTokensFromUrl(currentUrl);
+
+        setIsInvite(type === "invite" || type === "signup");
 
         if (error) {
           setMessage(error);
@@ -117,8 +120,10 @@ export default function AdminResetPasswordScreen() {
 
     await supabase.auth.signOut();
     showAlert(
-      "Password updated",
-      "Your password has been reset. Please log in with your new password.",
+      isInvite ? "Account ready" : "Password updated",
+      isInvite
+        ? "Your password has been set. Please log in to continue."
+        : "Your password has been reset. Please log in with your new password.",
     );
     router.replace("/admin/login");
   };
@@ -126,15 +131,18 @@ export default function AdminResetPasswordScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.card}>
-        <Text style={styles.title}>Reset Manager Password</Text>
+        <Text style={styles.title}>
+          {isInvite ? "Welcome to the Team" : "Reset Manager Password"}
+        </Text>
 
         {checking ? (
           <ActivityIndicator color="#D1DCF3" />
         ) : !sessionReady ? (
           <>
             <Text style={styles.subtitle}>
-              This reset link is invalid or has expired. Request a new one
-              from the manager login screen.
+              {isInvite
+                ? "This invite link is invalid or has expired. Ask a manager to resend your invite."
+                : "This reset link is invalid or has expired. Request a new one from the manager login screen."}
             </Text>
             {message ? <Text style={styles.message}>{message}</Text> : null}
             <Pressable
@@ -146,7 +154,11 @@ export default function AdminResetPasswordScreen() {
           </>
         ) : (
           <>
-            <Text style={styles.subtitle}>Enter a new password.</Text>
+            <Text style={styles.subtitle}>
+              {isInvite
+                ? "Your email has been verified. Set a password to activate your manager account."
+                : "Enter a new password."}
+            </Text>
 
             <TextInput
               style={styles.input}
@@ -175,7 +187,9 @@ export default function AdminResetPasswordScreen() {
               {saving ? (
                 <ActivityIndicator color="#FFF" />
               ) : (
-                <Text style={styles.buttonText}>Set New Password</Text>
+                <Text style={styles.buttonText}>
+                  {isInvite ? "Set Password & Activate" : "Set New Password"}
+                </Text>
               )}
             </Pressable>
 

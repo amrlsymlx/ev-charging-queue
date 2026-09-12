@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+    Animated,
     Pressable,
     SafeAreaView,
     ScrollView,
@@ -31,6 +32,7 @@ export default function CustomerStatusScreen() {
     getQueueEntryById,
     getQueuePosition,
     getEtaForEntry,
+    rainMode,
   } = useQueue();
 
   // Forces a re-render every second so countdowns show live seconds.
@@ -38,6 +40,26 @@ export default function CustomerStatusScreen() {
   useEffect(() => {
     const interval = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  const blink = useRef(new Animated.Value(1));
+  useEffect(() => {
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(blink.current, {
+          toValue: 0.25,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(blink.current, {
+          toValue: 1,
+          duration: 500,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    anim.start();
+    return () => anim.stop();
   }, []);
 
   const entry = id ? getQueueEntryById(id) : undefined;
@@ -76,9 +98,6 @@ export default function CustomerStatusScreen() {
     );
   const queuePosition = getQueuePosition(entry.id);
   const etaSeconds = getEtaForEntry(entry.id);
-  const historicalCount = queueEntries.filter(
-    (item) => item.status === "completed",
-  ).length;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -89,19 +108,43 @@ export default function CustomerStatusScreen() {
           <Text style={styles.heroTitle}>Hello, {entry.name}</Text>
           <PlateBadge plateNumber={entry.plateNumber} />
           <Text style={styles.heroStatus}>
-            Status: {entry.status.toUpperCase()}
+            Status:{" "}
+            {entry.gpsOverrideRequested && !entry.gpsOverrideApproved
+              ? "WAITING APPROVAL"
+              : entry.status === "completed"
+                ? `COMPLETED at ${formatClockTime(new Date(entry.updatedAt))}`
+                : entry.status.toUpperCase()}
           </Text>
+
+          {entry.status === "waiting" && rainMode ? (
+            <View style={styles.rainBanner}>
+              <Ionicons name="thunderstorm-outline" size={16} color="#9FD3FF" />
+              <Text style={styles.rainBannerText}>
+                Heavy rain — for safety reasons, all queuing charging are
+                unable to start at the moment.
+              </Text>
+            </View>
+          ) : null}
 
           {entry.status === "waiting" && queuePosition ? (
             <>
-              <Text style={styles.metricLabel}>Current Position</Text>
+              <Text style={[styles.metricLabel, styles.centeredText]}>
+                Current Position
+              </Text>
               <Text style={styles.metricValue}>#{queuePosition}</Text>
               <Text style={[styles.metricLabel, styles.centeredText]}>
-                ETA Start Charging | ETA Start Time:{" "}
-                {formatClockTime(new Date(Date.now() + etaSeconds * 1000))}
+                ETA Start Charging
               </Text>
               <Text style={styles.metricValue}>
-                {formatCountdown(etaSeconds)}
+                {rainMode ? "∞" : formatCountdown(etaSeconds)}
+              </Text>
+              <Text style={[styles.metricLabel, styles.centeredText]}>
+                ETA Start Time
+              </Text>
+              <Text style={styles.metricValue}>
+                {rainMode
+                  ? "∞"
+                  : formatClockTime(new Date(Date.now() + etaSeconds * 1000))}
               </Text>
               <View style={styles.progressTrack}>
                 <View
@@ -125,6 +168,12 @@ export default function CustomerStatusScreen() {
 
           {entry.status === "charging" && myPhase ? (
             <>
+              {myPhase.phase === "charging" ? (
+                <View style={styles.carChargingRow}>
+                  <Ionicons name="car-sport" size={20} color="#7CFFBA" />
+                  <Text style={styles.carChargingText}>Car is charging</Text>
+                </View>
+              ) : null}
               <View style={styles.timerRow}>
                 {myPhase.phase === "charging" ? (
                   <Ionicons
@@ -145,9 +194,21 @@ export default function CustomerStatusScreen() {
                     : ""}
                 </Text>
               </View>
-              <Text style={styles.metricValue}>
-                {formatCountdown(myPhase.remainingSeconds)}
-              </Text>
+              {myPhase.phase === "charging" && myPhase.remainingSeconds <= 300 ? (
+                <Animated.Text
+                  style={[
+                    styles.metricValue,
+                    styles.chargingTimer,
+                    { opacity: blink.current },
+                  ]}
+                >
+                  {formatCountdown(myPhase.remainingSeconds)}
+                </Animated.Text>
+              ) : (
+                <Text style={styles.metricValue}>
+                  {formatCountdown(myPhase.remainingSeconds)}
+                </Text>
+              )}
               <View style={styles.progressTrack}>
                 <View
                   style={[
@@ -161,6 +222,13 @@ export default function CustomerStatusScreen() {
                   ]}
                 />
               </View>
+              {myPhase.phase === "done" ? (
+                <Animated.Text
+                  style={[styles.removeCarText, { opacity: blink.current }]}
+                >
+                  Charging complete — kindly move your car now.
+                </Animated.Text>
+              ) : null}
             </>
           ) : null}
 
@@ -171,7 +239,8 @@ export default function CustomerStatusScreen() {
           ) : null}
         </View>
 
-        <View style={styles.sectionCard}>
+        {entry.status !== "charging" ? (
+        <View style={[styles.sectionCard, styles.sectionCardBays]}>
           <Text style={styles.sectionTitle}>Charging Bays</Text>
           {bays.map((bay) => {
             const activeSession = activeSessionByBay.get(bay.id);
@@ -186,12 +255,14 @@ export default function CustomerStatusScreen() {
                 <Text style={styles.rowTitle}>{bay.name}</Text>
                 <Text
                   style={
-                    bay.status === "available"
-                      ? styles.available
-                      : styles.occupied
+                    !bay.enabled
+                      ? styles.bayDisabled
+                      : bay.status === "available"
+                        ? styles.available
+                        : styles.occupied
                   }
                 >
-                  {bay.status.toUpperCase()}
+                  {!bay.enabled ? "DISABLED" : bay.status.toUpperCase()}
                 </Text>
                 {activeSession?.startedAt ? (
                   (() => {
@@ -210,7 +281,9 @@ export default function CustomerStatusScreen() {
                         <PlateBadge
                           plateNumber={chargingEntry?.plateNumber ?? "Unknown"}
                         />
-                        <View style={styles.timerRow}>
+                        <View
+                          style={[styles.timerRow, styles.statusLineActive]}
+                        >
                           {phase === "charging" ? (
                             <Ionicons
                               name="hourglass-outline"
@@ -243,14 +316,27 @@ export default function CustomerStatusScreen() {
                     );
                   })()
                 ) : (
-                  <Text style={styles.rowSub}>Ready for next vehicle</Text>
+                  <Text
+                    style={[
+                      styles.rowSub,
+                      styles.rowSubCentered,
+                      !bay.enabled
+                        ? styles.statusLineDisabled
+                        : styles.statusLineReady,
+                    ]}
+                  >
+                    {!bay.enabled
+                      ? bay.disabledReason || "Unspecified"
+                      : "Ready for next vehicle"}
+                  </Text>
                 )}
               </View>
             );
           })}
         </View>
+        ) : null}
 
-        <View style={styles.sectionCard}>
+        <View style={[styles.sectionCard, styles.sectionCardQueue]}>
           <Text style={styles.sectionTitle}>Waiting Queue</Text>
           {waitingEntries.length === 0 ? (
             <Text style={styles.rowSub}>No one is waiting right now.</Text>
@@ -268,19 +354,9 @@ export default function CustomerStatusScreen() {
           ))}
         </View>
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>System Snapshot</Text>
-          <Text style={styles.rowSub}>
-            Completed sessions today: {historicalCount}
-          </Text>
-          <Text style={styles.rowSub}>
-            Realtime updates refresh whenever SA actions happen.
-          </Text>
-        </View>
-
         <Pressable
           style={{ alignItems: "center", marginTop: 8 }}
-          onPress={() => router.push("/")}
+          onPress={() => router.push("/customer")}
         >
           <Text style={styles.linkText}>Back to main page</Text>
         </Pressable>
@@ -314,8 +390,10 @@ const styles = StyleSheet.create({
   },
   heroStatus: {
     color: "#CAE0FF",
+    marginTop: 8,
     marginBottom: 8,
     fontWeight: "700",
+    textAlign: "center",
   },
   metricLabel: {
     color: "#C8D7F0",
@@ -329,16 +407,62 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 6,
   },
+  rainBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    alignSelf: "center",
+    backgroundColor: "rgba(255, 208, 168, 0.14)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  rainBannerText: {
+    color: "#9FD3FF",
+    fontSize: 13,
+    textAlign: "center",
+  },
+  carChargingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "rgba(124, 255, 186, 0.16)",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  carChargingText: {
+    color: "#7CFFBA",
+    fontWeight: "800",
+  },
   metricValue: {
     fontSize: 28,
     color: "#FFF3EB",
     fontWeight: "800",
     marginBottom: 3,
+    textAlign: "center",
   },
   pendingText: {
-    marginTop: 8,
+    marginTop: 2,
     color: "#FFDCC2",
     fontWeight: "600",
+    textAlign: "center",
+  },
+  chargingTimer: {
+    color: "#FF3B30",
+    fontWeight: "900",
+  },
+  removeCarText: {
+    marginTop: 10,
+    color: "#FF3B30",
+    fontWeight: "900",
+    fontSize: 16,
+    textAlign: "center",
   },
   progressTrack: {
     height: 8,
@@ -368,6 +492,12 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 8,
   },
+  sectionCardBays: {
+    backgroundColor: "rgba(124, 255, 186, 0.10)",
+  },
+  sectionCardQueue: {
+    backgroundColor: "rgba(255, 208, 168, 0.12)",
+  },
   sectionTitle: {
     fontSize: 17,
     fontWeight: "700",
@@ -396,6 +526,30 @@ const styles = StyleSheet.create({
   occupied: {
     color: "#FFD0A8",
     fontWeight: "700",
+  },
+  bayDisabled: {
+    color: "#FF9B8A",
+    fontWeight: "700",
+  },
+  rowSubCentered: {
+    textAlign: "center",
+    width: "100%",
+  },
+  statusLineActive: {
+    backgroundColor: "rgba(255, 208, 90, 0.16)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  statusLineDisabled: {
+    backgroundColor: "rgba(255, 90, 90, 0.16)",
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  statusLineReady: {
+    backgroundColor: "rgba(124, 255, 186, 0.16)",
+    paddingVertical: 6,
+    borderRadius: 8,
   },
   queueRow: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",

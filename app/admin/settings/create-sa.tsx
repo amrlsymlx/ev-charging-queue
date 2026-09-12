@@ -5,8 +5,8 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
     ActivityIndicator,
+    Modal,
     Pressable,
-    SafeAreaView,
     StyleSheet,
     Text,
     TextInput,
@@ -121,80 +121,95 @@ export default function CreateSaScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Create SA Account</Text>
-        <Text style={styles.subtitle}>Enter SA ID and password.</Text>
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      onRequestClose={() => router.back()}
+    >
+      <View style={styles.overlay}>
+        <View style={styles.card}>
+          <Text style={styles.title}>Create SA Account</Text>
+          <Text style={styles.subtitle}>Enter SA ID and password.</Text>
 
-        <TextInput
-          style={styles.input}
-          value={id}
-          onChangeText={setId}
-          placeholder="SA ID"
-          placeholderTextColor="#7E8EA8"
-          autoCapitalize="none"
-        />
-        {idHasUppercase ? (
-          <Text style={styles.errorText}>Letters must be lowercase.</Text>
-        ) : null}
-
-        <View style={styles.inputRow}>
           <TextInput
-            style={styles.inputFlex}
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Password"
+            style={styles.input}
+            value={id}
+            onChangeText={setId}
+            placeholder="SA ID"
             placeholderTextColor="#7E8EA8"
-            secureTextEntry={!showPassword}
             autoCapitalize="none"
           />
-          <Pressable
-            onPress={() => setShowPassword((s) => !s)}
-            style={styles.eyeButton}
-          >
-            <Ionicons
-              name={showPassword ? "eye" : "eye-off"}
-              size={20}
-              color="#9FB0CD"
+          {idHasUppercase ? (
+            <Text style={styles.errorText}>Letters must be lowercase.</Text>
+          ) : null}
+
+          <View style={styles.inputRow}>
+            <TextInput
+              style={styles.inputFlex}
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              placeholderTextColor="#7E8EA8"
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
             />
+            <Pressable
+              onPress={() => setShowPassword((s) => !s)}
+              style={styles.eyeButton}
+            >
+              <Ionicons
+                name={showPassword ? "eye" : "eye-off"}
+                size={20}
+                color="#9FB0CD"
+              />
+            </Pressable>
+          </View>
+
+          <Pressable
+            style={[
+              styles.button,
+              (saving || idHasUppercase || !id.trim() || !password) &&
+                styles.buttonDisabled,
+            ]}
+            onPress={onCreate}
+            disabled={saving || idHasUppercase || !id.trim() || !password}
+          >
+            {saving ? (
+              <ActivityIndicator color="#FFF" />
+            ) : (
+              <Text style={styles.buttonText}>Create</Text>
+            )}
+          </Pressable>
+
+          {message ? <Text style={styles.message}>{message}</Text> : null}
+
+          <Pressable
+            style={{ alignItems: "center", marginTop: 12 }}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.linkText}>Close</Text>
           </Pressable>
         </View>
-
-        <Pressable
-          style={[
-            styles.button,
-            (saving || idHasUppercase || !id.trim() || !password) &&
-              styles.buttonDisabled,
-          ]}
-          onPress={onCreate}
-          disabled={saving || idHasUppercase || !id.trim() || !password}
-        >
-          {saving ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.buttonText}>Create</Text>
-          )}
-        </Pressable>
-
-        {message ? <Text style={styles.message}>{message}</Text> : null}
       </View>
-
-      <Pressable
-        style={{ alignItems: "center", marginTop: 12 }}
-        onPress={() => router.back()}
-      >
-        <Text style={styles.linkText}>Back to Settings</Text>
-      </Pressable>
-    </SafeAreaView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#070D1A", padding: 16 },
-  card: {
-    backgroundColor: "rgba(255,255,255,0.04)",
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
     padding: 16,
-    borderRadius: 12,
+  },
+  card: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "rgba(20, 40, 34, 0.98)",
+    padding: 18,
+    borderRadius: 14,
   },
   title: { fontSize: 20, color: "#F6FAFF", fontWeight: "700" },
   subtitle: { color: "#9FB0CD", marginBottom: 8 },

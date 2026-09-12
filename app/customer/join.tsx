@@ -197,7 +197,7 @@ export default function CustomerJoinScreen() {
   }, [waitingEntries, bays, getEtaForPosition, tick]);
 
   const estimatedWait = useMemo(() => {
-    if (rainMode) return "Indefinite";
+    if (rainMode) return "∞";
     if (estimatedWaitSeconds === null) return "--";
     return formatCountdown(estimatedWaitSeconds);
   }, [rainMode, estimatedWaitSeconds]);
@@ -397,23 +397,16 @@ export default function CustomerJoinScreen() {
         batteryPercentage: battery,
         gpsValidated,
         gpsOverrideRequested: !gpsValidated,
+        agreedToTerms: agreed,
       });
 
       if (gpsValidated) {
         setMessage("Queue join success, track your queue now.");
-        showAlert("Queue join success", "Track your queue now", [
-          { text: "Later", style: "cancel" },
-          {
-            text: "Track Queue",
-            onPress: () => router.push("/customer/track"),
-          },
-        ]);
-        return;
+      } else {
+        setMessage(
+          "Override request submitted. You can monitor status while waiting for SA approval.",
+        );
       }
-
-      setMessage(
-        "Override request submitted. You can monitor status while waiting for SA approval.",
-      );
 
       router.push({
         pathname: "/customer/status",
@@ -605,7 +598,7 @@ export default function CustomerJoinScreen() {
 
           {formattedPlate ? <PlateBadge plateNumber={formattedPlate} /> : null}
 
-          <View style={{ marginTop: 6 }}>
+          <View style={{ marginTop: 6, alignItems: "center" }}>
             <BatteryIndicator percentage={toSafeBatteryValue(batteryPercentage)} />
             <Slider
               style={{ width: "100%", height: 40 }}
@@ -654,6 +647,7 @@ export default function CustomerJoinScreen() {
           <Pressable
             style={[
               styles.primaryButton,
+              styles.joinButton,
               (!agreed ||
                 submitting ||
                 (scheduleEval ? !scheduleEval.canRegister : false)) &&
@@ -680,6 +674,8 @@ export default function CustomerJoinScreen() {
               </Text>
             )}
           </Pressable>
+
+          {message ? <Text style={styles.message}>{message}</Text> : null}
         </View>
 
         <Pressable
@@ -713,8 +709,6 @@ export default function CustomerJoinScreen() {
             }`}
           />
         ) : null}
-
-        {message ? <Text style={styles.message}>{message}</Text> : null}
       </ScrollView>
 
       <Modal
@@ -859,6 +853,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   primaryButtonText: { color: "#FFF6F2", fontWeight: "700" },
+  joinButton: {
+    backgroundColor: "#22C55E",
+  },
   disabledButton: { opacity: 0.5 },
   checkbox: {
     width: 20,
@@ -878,6 +875,7 @@ const styles = StyleSheet.create({
     color: "#FFE2CC",
     lineHeight: 20,
     paddingHorizontal: 2,
+    textAlign: "center",
     zIndex: 0,
   },
   bgGlowOne: {

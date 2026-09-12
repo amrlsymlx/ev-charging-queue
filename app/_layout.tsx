@@ -42,19 +42,31 @@ export default function RootLayout() {
         />
         <Stack.Screen
           name="admin/settings/blocked-plates"
-          options={{ title: "Blocked Plate Numbers" }}
+          options={{ title: "Blocked Plate Numbers", presentation: "modal" }}
         />
         <Stack.Screen
           name="admin/settings/bays"
-          options={{ title: "Charging Bays" }}
+          options={{ title: "Charging Bays", presentation: "modal" }}
         />
         <Stack.Screen
           name="admin/settings/terms"
-          options={{ title: "Terms & Conditions" }}
+          options={{ title: "Terms & Conditions", presentation: "modal" }}
         />
         <Stack.Screen
           name="admin/settings/operating-hours"
-          options={{ title: "Operating Hours" }}
+          options={{ title: "Operating Hours", presentation: "modal" }}
+        />
+        <Stack.Screen
+          name="admin/settings/showroom"
+          options={{ title: "Showroom Settings", presentation: "modal" }}
+        />
+        <Stack.Screen
+          name="admin/settings/create-sa"
+          options={{ title: "Create SA Account", presentation: "modal" }}
+        />
+        <Stack.Screen
+          name="admin/settings/create-manager"
+          options={{ title: "Create Manager Account", presentation: "modal" }}
         />
       </Stack>
     </QueueProvider>

@@ -48,6 +48,7 @@ interface QueueContextValue {
   ) => Promise<boolean>;
   endCharging: (sessionId: string) => Promise<boolean>;
   removeQueueEntry: (entryId: string) => Promise<void>;
+  deleteQueueEntries: (entryIds: string[]) => Promise<{ error?: string }>;
   approveOverride: (entryId: string) => Promise<void>;
   rejectOverride: (entryId: string) => Promise<void>;
   addBay: (name: string) => Promise<void>;
@@ -70,7 +71,7 @@ const INITIAL_SA_USERS: SAUser[] = [];
 // Columns the anon (customer) role is granted; phone_number is deliberately
 // excluded at the database column-privilege level, so this list must match.
 const ANON_QUEUE_COLUMNS =
-  "id, name, plate_number, battery_percentage, joined_at, status, gps_validated, gps_override_requested, gps_override_approved, bay_id, created_at, updated_at";
+  "id, name, plate_number, battery_percentage, joined_at, status, gps_validated, gps_override_requested, gps_override_approved, agreed_to_terms, bay_id, created_at, updated_at";
 
 function mapBay(row: any): ChargingBay {
   return {
@@ -96,6 +97,7 @@ function mapQueueEntry(row: any): QueueEntry {
     gpsValidated: row.gps_validated,
     gpsOverrideRequested: row.gps_override_requested,
     gpsOverrideApproved: row.gps_override_approved,
+    agreedToTerms: row.agreed_to_terms ?? false,
     bayId: row.bay_id ?? undefined,
     overrideChargingMinutes: row.override_charging_minutes ?? undefined,
     createdAt: row.created_at,
@@ -133,6 +135,8 @@ export function QueueProvider({ children }: PropsWithChildren) {
 
   const isStaffRef = useRef(isStaff);
   isStaffRef.current = isStaff;
+
+  const loggedOvertimeRef = useRef<Set<string>>(new Set());
 
   const loadTimerSettings = async () => {
     const { data, error } = await supabase
@@ -278,6 +282,68 @@ export function QueueProvider({ children }: PropsWithChildren) {
     [chargingSessions],
   );
 
+  // Auto-detects sessions where charging finished but nobody (SA or system)
+  // has ended the session 5+ minutes past the planned end time — logs "Over
+  // Time" without waiting for an SA/manager action. loggedOvertimeRef avoids
+  // re-checking the same session on every poll tick within this client; the
+  // activity_logs lookup guards against duplicate rows across multiple
+  // clients (customer/SA/admin apps) that each run this same check.
+  useEffect(() => {
+    const checkOvertime = async () => {
+      const now = Date.now();
+
+      for (const session of activeSessions) {
+        if (!session.startedAt) continue;
+        if (loggedOvertimeRef.current.has(session.id)) continue;
+
+        const plannedEndTime =
+          +new Date(session.startedAt) +
+          session.plannedDurationMinutes * 60000;
+        const overtimeMinutes = Math.floor((now - plannedEndTime) / 60000);
+        if (overtimeMinutes < 5) continue;
+
+        const entry = queueEntries.find(
+          (item) => item.id === session.queueEntryId,
+        );
+        // queueEntries may not have loaded this entry yet (e.g. right after
+        // mount) — skip without marking as logged so it retries next tick
+        // instead of permanently falling back to the raw queueEntryId.
+        if (!entry) continue;
+        const plateNumber = entry.plateNumber;
+
+        loggedOvertimeRef.current.add(session.id);
+
+        const { data: existing } = await supabase
+          .from("activity_logs")
+          .select("id")
+          .eq("action", "over_time")
+          .eq("target_type", "queue_entry")
+          .eq("target_id", plateNumber)
+          .gte("created_at", session.startedAt)
+          .limit(1);
+
+        if (existing && existing.length > 0) continue;
+
+        void logActivity({
+          action: "over_time",
+          actorRole: "customer",
+          actorName: plateNumber,
+          targetType: "queue_entry",
+          targetId: plateNumber,
+          details: {
+            plateNumber,
+            bayId: session.bayId,
+            overtimeMinutes,
+          },
+        });
+      }
+    };
+
+    checkOvertime();
+    const interval = setInterval(checkOvertime, 30000);
+    return () => clearInterval(interval);
+  }, [activeSessions, queueEntries]);
+
   const pendingOverrideEntries = useMemo(
     () =>
       allWaitingEntries.filter(
@@ -304,6 +370,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
           gps_validated: input.gpsValidated,
           gps_override_requested: input.gpsOverrideRequested,
           gps_override_approved: false,
+          agreed_to_terms: input.agreedToTerms,
         },
       ])
       .select(ANON_QUEUE_COLUMNS)
@@ -353,6 +420,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
           gps_validated: true,
           gps_override_requested: false,
           gps_override_approved: true,
+          agreed_to_terms: false,
           override_charging_minutes: input.overrideChargingMinutes ?? null,
         },
       ])
@@ -605,6 +673,40 @@ export function QueueProvider({ children }: PropsWithChildren) {
     }
   };
 
+  // Permanently deletes queue entries and their charging sessions — unlike
+  // removeQueueEntry (which just marks status "cancelled"), this is a hard
+  // delete used by the manager's Customer History "Reset" action. Sessions
+  // must go first: charging_sessions.queue_entry_id has no ON DELETE CASCADE.
+  const deleteQueueEntries = async (
+    entryIds: string[],
+  ): Promise<{ error?: string }> => {
+    if (entryIds.length === 0) return {};
+
+    const { error: sessionsError } = await supabase
+      .from("charging_sessions")
+      .delete()
+      .in("queue_entry_id", entryIds);
+
+    if (sessionsError) return { error: sessionsError.message };
+
+    const { error: entriesError } = await supabase
+      .from("queue_entries")
+      .delete()
+      .in("id", entryIds);
+
+    if (entriesError) return { error: entriesError.message };
+
+    await Promise.all([loadQueueEntries(), loadChargingSessions()]);
+
+    void logActivity({
+      action: "queue.bulk_delete",
+      targetType: "queue_entry",
+      details: { count: entryIds.length },
+    });
+
+    return {};
+  };
+
   const approveOverride = async (entryId: string) => {
     const timestamp = new Date().toISOString();
     const { error } = await supabase
@@ -800,6 +902,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
     startCharging,
     endCharging,
     removeQueueEntry,
+    deleteQueueEntries,
     approveOverride,
     rejectOverride,
     addBay,

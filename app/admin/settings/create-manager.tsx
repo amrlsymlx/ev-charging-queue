@@ -1,11 +1,12 @@
 import { showAlert } from "@/lib/alert";
 import { SUPABASE_URL, supabase } from "@/lib/supabase";
 import { useRouter } from "expo-router";
+import * as Linking from "expo-linking";
 import { useState } from "react";
 import {
     ActivityIndicator,
+    Modal,
     Pressable,
-    SafeAreaView,
     StyleSheet,
     Text,
     TextInput,
@@ -54,7 +55,15 @@ export default function CreateManagerScreen() {
         return;
       }
 
-      const payload = { email: normalizedEmail, name: trimmedName };
+      // The edge function runs server-side and has no notion of this app's
+      // origin, so the client (which does) passes the accept-invite
+      // destination explicitly — same URL admin/login.tsx uses for its own
+      // password-reset flow.
+      const payload = {
+        email: normalizedEmail,
+        name: trimmedName,
+        redirectTo: Linking.createURL("/admin/reset-password"),
+      };
 
       const res = await supabase.functions.invoke("create-manager-account", {
         body: payload,
@@ -111,67 +120,82 @@ export default function CreateManagerScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.title}>Create Manager Account</Text>
-        <Text style={styles.subtitle}>
-          Enter the new manager&apos;s email and display name. They&apos;ll
-          get an email to verify their address and set their own password.
-        </Text>
+    <Modal
+      visible
+      transparent
+      animationType="fade"
+      onRequestClose={() => router.back()}
+    >
+      <View style={styles.overlay}>
+        <View style={styles.card}>
+          <Text style={styles.title}>Create Manager Account</Text>
+          <Text style={styles.subtitle}>
+            Enter the new manager&apos;s email and display name. They&apos;ll
+            get an email to verify their address and set their own password.
+          </Text>
 
-        <TextInput
-          style={styles.input}
-          value={displayName}
-          onChangeText={setDisplayName}
-          placeholder="Display Name"
-          placeholderTextColor="#7E8EA8"
-        />
+          <TextInput
+            style={styles.input}
+            value={displayName}
+            onChangeText={setDisplayName}
+            placeholder="Display Name"
+            placeholderTextColor="#7E8EA8"
+          />
 
-        <TextInput
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="Manager Email"
-          placeholderTextColor="#7E8EA8"
-          autoCapitalize="none"
-          keyboardType="email-address"
-        />
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="Manager Email"
+            placeholderTextColor="#7E8EA8"
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
 
-        <Pressable
-          style={[
-            styles.button,
-            (saving || !email.trim() || !displayName.trim()) &&
-              styles.buttonDisabled,
-          ]}
-          onPress={onCreate}
-          disabled={saving || !email.trim() || !displayName.trim()}
-        >
-          {saving ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <Text style={styles.buttonText}>Send Invite</Text>
-          )}
-        </Pressable>
+          <Pressable
+            style={[
+              styles.button,
+              (saving || !email.trim() || !displayName.trim()) &&
+                styles.buttonDisabled,
+            ]}
+            onPress={onCreate}
+            disabled={saving || !email.trim() || !displayName.trim()}
+          >
+            {saving ? (
+              <ActivityIndicator color="#FFF" />
+            ) : (
+              <Text style={styles.buttonText}>Send Invite</Text>
+            )}
+          </Pressable>
 
-        {message ? <Text style={styles.message}>{message}</Text> : null}
+          {message ? <Text style={styles.message}>{message}</Text> : null}
+
+          <Pressable
+            style={{ alignItems: "center", marginTop: 12 }}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.linkText}>Close</Text>
+          </Pressable>
+        </View>
       </View>
-
-      <Pressable
-        style={{ alignItems: "center", marginTop: 12 }}
-        onPress={() => router.back()}
-      >
-        <Text style={styles.linkText}>Back to Settings</Text>
-      </Pressable>
-    </SafeAreaView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#070D1A", padding: 16 },
-  card: {
-    backgroundColor: "rgba(255,255,255,0.04)",
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
     padding: 16,
-    borderRadius: 12,
+  },
+  card: {
+    width: "100%",
+    maxWidth: 420,
+    backgroundColor: "rgba(12,16,26,0.98)",
+    padding: 18,
+    borderRadius: 14,
   },
   title: { fontSize: 20, color: "#F6FAFF", fontWeight: "700" },
   subtitle: { color: "#9FB0CD", marginBottom: 8 },

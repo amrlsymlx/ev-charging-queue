@@ -323,6 +323,13 @@ export default function ShowroomSettingsScreen() {
             </>
           )}
         </View>
+
+        <Pressable
+          style={{ alignItems: "center", marginTop: 12, marginBottom: 12 }}
+          onPress={() => router.back()}
+        >
+          <Text style={styles.linkText}>Back to Settings</Text>
+        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
@@ -403,4 +410,5 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: "#E8F0FF", fontWeight: "600" },
   message: { color: "#FFD0A8", marginTop: 8 },
+  linkText: { color: "#C4D2FF", textAlign: "center" },
 });

@@ -28,7 +28,10 @@ export default function SADashboardScreen() {
       <View style={styles.bgGlowTwo} />
 
       <View style={styles.headerRow}>
-        <Text style={styles.heading}>SA Dashboard</Text>
+        <View>
+          <Text style={styles.heading}>SA Dashboard</Text>
+          <Text style={styles.greeting}>Hello, {saName}</Text>
+        </View>
         <View style={styles.headerActions}>
           <Pressable
             onPress={() => router.push("/")}
@@ -105,6 +108,14 @@ const styles = StyleSheet.create({
     color: "#F4F8FF",
     fontSize: 27,
     fontWeight: "800",
+    textAlign: "center",
+  },
+  greeting: {
+    color: "#C4D2FF",
+    fontSize: 13,
+    fontWeight: "600",
+    textAlign: "center",
+    marginTop: 2,
   },
   headerActions: {
     flexDirection: "row",

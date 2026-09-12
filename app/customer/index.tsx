@@ -40,7 +40,12 @@ export default function CustomerLandingScreen() {
           </Link>
 
           <Link href="/customer/track" asChild>
-            <Pressable style={styles.secondaryButtonRow}>
+            <Pressable
+              style={StyleSheet.flatten([
+                styles.secondaryButtonRow,
+                styles.trackQueueButton,
+              ])}
+            >
               <Ionicons
                 name="search"
                 size={16}
@@ -52,14 +57,23 @@ export default function CustomerLandingScreen() {
           </Link>
 
           <Link href="/public/board?from=customer" asChild>
-            <Pressable style={styles.secondaryButtonRow}>
+            <Pressable
+              style={StyleSheet.flatten([
+                styles.secondaryButtonRow,
+                styles.queueBoardButton,
+              ])}
+            >
               <Ionicons
                 name="tv-outline"
                 size={16}
-                color="#EAF2FF"
+                color="#1A1400"
                 style={{ marginRight: 8 }}
               />
-              <Text style={styles.secondaryButtonText}>Public Queue Board</Text>
+              <Text
+                style={[styles.secondaryButtonText, styles.queueBoardButtonText]}
+              >
+                Live Queue Board
+              </Text>
             </Pressable>
           </Link>
         </View>
@@ -108,7 +122,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   primaryButton: {
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    backgroundColor: "#22C55E",
     borderWidth: 0,
     borderColor: "transparent",
     borderRadius: 10,
@@ -141,6 +155,15 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: "#EAF2FF",
     fontWeight: "700",
+  },
+  trackQueueButton: {
+    backgroundColor: "#3B82F6",
+  },
+  queueBoardButton: {
+    backgroundColor: "#F5C518",
+  },
+  queueBoardButtonText: {
+    color: "#1A1400",
   },
   helperText: {
     color: "#D1DCF3",

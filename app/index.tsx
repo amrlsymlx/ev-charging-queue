@@ -76,7 +76,7 @@ export default function Index() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.title}>Shareable Links</Text>
+        <Text style={styles.title}>Links</Text>
 
         {SHARE_LINKS.map(({ key, label, path }) => {
           const link = Linking.createURL(path);
@@ -119,6 +119,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     justifyContent: "center",
     overflow: "hidden",
+    gap: 16,
   },
   card: {
     backgroundColor: "rgba(255, 255, 255, 0.12)",
