@@ -1,3 +1,6 @@
+import ActivityLogPanel from "@/components/ActivityLogPanel";
+import PublicBoardPanel from "@/components/PublicBoardPanel";
+import SAQueuePanel from "@/components/SAQueuePanel";
 import { useQueue } from "@/context/QueueContext";
 import { logActivity } from "@/lib/activityLog";
 import { promptForInput, showAlert } from "@/lib/alert";
@@ -36,8 +39,16 @@ export default function AdminDashboard() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [isManagerSession, setIsManagerSession] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [tab, setTab] = useState<"stats" | "home" | "settings">(
-    tabParam === "settings" || tabParam === "stats" ? tabParam : "home",
+  const [managerName, setManagerName] = useState("Manager");
+  const [tab, setTab] = useState<
+    "stats" | "home" | "queue" | "board" | "settings"
+  >(
+    tabParam === "settings" ||
+      tabParam === "stats" ||
+      tabParam === "queue" ||
+      tabParam === "board"
+      ? tabParam
+      : "home",
   );
   const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -65,6 +76,11 @@ export default function AdminDashboard() {
         const user = data?.user;
         const role = user?.app_metadata?.role || user?.user_metadata?.role;
         setIsManagerSession(role === "manager" || role === "admin");
+        setManagerName(
+          user?.user_metadata?.name ||
+            user?.email?.split("@")[0] ||
+            "Manager",
+        );
       } catch {
         setIsManagerSession(false);
       } finally {
@@ -79,7 +95,13 @@ export default function AdminDashboard() {
   }, []);
 
   useEffect(() => {
-    if (tabParam === "settings" || tabParam === "stats" || tabParam === "home") {
+    if (
+      tabParam === "settings" ||
+      tabParam === "stats" ||
+      tabParam === "queue" ||
+      tabParam === "board" ||
+      tabParam === "home"
+    ) {
       setTab(tabParam);
     }
   }, [tabParam]);
@@ -378,20 +400,29 @@ export default function AdminDashboard() {
         <View style={styles.headerRow}>
           <Text style={styles.heading}>Manager Dashboard</Text>
           {tab === "home" ? (
-            <Pressable
-              onPress={async () => {
-                try {
-                  await supabase.auth.signOut();
-                } catch {
-                  // ignore
-                }
-                router.replace("/admin/login");
-              }}
-              style={styles.logoutButton}
-              accessibilityLabel="Logout"
-            >
-              <Ionicons name="log-out" size={20} color="#F6FAFF" />
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                onPress={() => router.push("/")}
+                style={styles.logoutButton}
+                accessibilityLabel="Home"
+              >
+                <Ionicons name="home" size={20} color="#F6FAFF" />
+              </Pressable>
+              <Pressable
+                onPress={async () => {
+                  try {
+                    await supabase.auth.signOut();
+                  } catch {
+                    // ignore
+                  }
+                  router.replace("/admin/login");
+                }}
+                style={styles.logoutButton}
+                accessibilityLabel="Logout"
+              >
+                <Ionicons name="log-out" size={20} color="#F6FAFF" />
+              </Pressable>
+            </View>
           ) : null}
         </View>
       </View>
@@ -435,6 +466,11 @@ export default function AdminDashboard() {
                 </View>
               ))}
             </View>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Activity Log</Text>
+              <ActivityLogPanel />
+            </View>
+
             <Pressable
               style={{ alignItems: "center", marginTop: 8 }}
               onPress={() => router.push("/")}
@@ -443,6 +479,12 @@ export default function AdminDashboard() {
             </Pressable>
           </>
         )}
+
+        {tab === "queue" && (
+          <SAQueuePanel saName={managerName} role="manager" embedded />
+        )}
+
+        {tab === "board" && <PublicBoardPanel embedded />}
 
         {tab === "settings" && (
           <>
@@ -545,6 +587,22 @@ export default function AdminDashboard() {
             </View>
 
             <View style={styles.card}>
+              <Text style={styles.cardTitle}>Operating Hours</Text>
+              <Text style={styles.rowMuted}>
+                Weekly opening/closing times, last registration cutoff, and
+                public holidays.
+              </Text>
+
+              <Pressable
+                style={[styles.primaryButton, { marginTop: 12 }]}
+                onPress={() => router.push("/admin/settings/operating-hours")}
+                disabled={checkingAuth || !isManagerSession}
+              >
+                <Text style={styles.buttonText}>Manage Operating Hours</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.card}>
               <Text style={styles.cardTitle}>Terms & Conditions</Text>
               <Text style={styles.rowMuted}>
                 Shown to customers on the Join Queue screen.
@@ -556,21 +614,6 @@ export default function AdminDashboard() {
                 disabled={checkingAuth || !isManagerSession}
               >
                 <Text style={styles.buttonText}>Edit Terms & Conditions</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Activity Log</Text>
-              <Text style={styles.rowMuted}>
-                Every customer, SA, and manager action.
-              </Text>
-
-              <Pressable
-                style={[styles.primaryButton, { marginTop: 12 }]}
-                onPress={() => router.push("/admin/settings/logs")}
-                disabled={checkingAuth || !isManagerSession}
-              >
-                <Text style={styles.buttonText}>View Activity Log</Text>
               </Pressable>
             </View>
 
@@ -795,6 +838,20 @@ export default function AdminDashboard() {
             color={tab === "home" ? "#F6FAFF" : "#9FB0CD"}
           />
         </Pressable>
+        <Pressable onPress={() => setTab("queue")} style={styles.tabButton}>
+          <Ionicons
+            name="flash"
+            size={28}
+            color={tab === "queue" ? "#F6FAFF" : "#9FB0CD"}
+          />
+        </Pressable>
+        <Pressable onPress={() => setTab("board")} style={styles.tabButton}>
+          <Ionicons
+            name="grid"
+            size={26}
+            color={tab === "board" ? "#F6FAFF" : "#9FB0CD"}
+          />
+        </Pressable>
         <Pressable onPress={() => setTab("settings")} style={styles.tabButton}>
           <Ionicons
             name="settings"
@@ -854,6 +911,7 @@ const styles = StyleSheet.create({
   listHeading: { color: "#E0EBFF", fontWeight: "700", marginBottom: 8 },
   message: { color: "#FFD0A8", marginTop: 8, textAlign: "center" },
   linkText: { color: "#C4D2FF", textAlign: "center" },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: 4 },
   logoutButton: { padding: 8 },
   tabBar: {
     position: "absolute",
@@ -864,12 +922,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-around",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: 12,
   },
   tabButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.03)",

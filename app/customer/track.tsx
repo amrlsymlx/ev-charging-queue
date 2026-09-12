@@ -79,16 +79,9 @@ export default function CustomerTrackScreen() {
 
       <Pressable
         style={{ alignItems: "center", marginTop: 10 }}
-        onPress={() => router.push("/")}
+        onPress={() => router.push("/customer")}
       >
         <Text style={styles.linkText}>Back to main page</Text>
-      </Pressable>
-
-      <Pressable
-        style={{ alignItems: "center", marginTop: 10 }}
-        onPress={() => router.push("/customer/join")}
-      >
-        <Text style={styles.linkText}>Join Queue</Text>
       </Pressable>
     </SafeAreaView>
   );

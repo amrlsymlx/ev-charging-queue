@@ -1,10 +1,19 @@
+import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
+import * as Linking from "expo-linking";
 import { Link } from "expo-router";
 import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { supabase } from "../lib/supabase";
 
+const SHARE_LINKS = [
+  { key: "customer", label: "Customer QR Landing", path: "/customer" },
+  { key: "board", label: "Live Queue Board", path: "/public/board" },
+] as const;
+
 export default function Index() {
   const [showroomName, setShowroomName] = useState("Showroom");
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
     const loadShowroom = async () => {
@@ -21,6 +30,14 @@ export default function Index() {
 
     void loadShowroom();
   }, []);
+
+  const copyLink = async (key: string, path: string) => {
+    await Clipboard.setStringAsync(Linking.createURL(path));
+    setCopiedKey(key);
+    setTimeout(() => {
+      setCopiedKey((current) => (current === key ? null : current));
+    }, 1500);
+  };
 
   return (
     <View style={styles.container}>
@@ -56,6 +73,39 @@ export default function Index() {
             </Pressable>
           </Link>
         </View>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.title}>Shareable Links</Text>
+
+        {SHARE_LINKS.map(({ key, label, path }) => {
+          const link = Linking.createURL(path);
+          const isCopied = copiedKey === key;
+          return (
+            <View key={key} style={styles.linkRow}>
+              <View style={styles.linkTextWrap}>
+                <Text style={styles.linkLabel}>{label}</Text>
+                <Text style={styles.linkUrl} numberOfLines={1}>
+                  {link}
+                </Text>
+              </View>
+              <Pressable
+                style={styles.copyButton}
+                onPress={() => copyLink(key, path)}
+                accessibilityLabel={`Copy ${label} link`}
+              >
+                <Ionicons
+                  name={isCopied ? "checkmark" : "copy-outline"}
+                  size={16}
+                  color="#F4F8FF"
+                />
+                <Text style={styles.copyButtonText}>
+                  {isCopied ? "Copied" : "Copy"}
+                </Text>
+              </Pressable>
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -196,6 +246,43 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     fontSize: 15,
     textAlign: "center",
+  },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    width: "100%",
+    backgroundColor: "rgba(255, 255, 255, 0.06)",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  linkTextWrap: {
+    flex: 1,
+  },
+  linkLabel: {
+    color: "#F4F8FF",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  linkUrl: {
+    color: "#9FB0CD",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  copyButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(132, 158, 255, 0.2)",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  copyButtonText: {
+    color: "#F4F8FF",
+    fontWeight: "700",
+    fontSize: 12,
   },
   bgCircleOne: {
     position: "absolute",

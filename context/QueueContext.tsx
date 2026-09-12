@@ -29,6 +29,11 @@ interface QueueContextValue {
   activeSessions: ChargingSession[];
   pendingOverrideEntries: QueueEntry[];
   defaultChargingMinutes: number;
+  rainMode: boolean;
+  setRainMode: (
+    enabled: boolean,
+    actor: { actorRole: "sa" | "manager"; actorName?: string },
+  ) => Promise<void>;
   addQueueEntry: (input: NewQueueEntryInput) => Promise<QueueEntry>;
   addStaffQueueEntry: (input: NewStaffQueueEntryInput) => Promise<QueueEntry>;
   getQueueEntryById: (entryId: string) => QueueEntry | undefined;
@@ -124,6 +129,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
   const [isStaff, setIsStaff] = useState(false);
   const [graceMinutes, setGraceMinutes] = useState(GRACE_MINUTES);
   const [chargingMinutes, setChargingMinutes] = useState(CHARGING_MINUTES);
+  const [rainMode, setRainModeState] = useState(false);
 
   const isStaffRef = useRef(isStaff);
   isStaffRef.current = isStaff;
@@ -131,7 +137,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
   const loadTimerSettings = async () => {
     const { data, error } = await supabase
       .from("showroom_settings")
-      .select("grace_minutes, charging_minutes")
+      .select("grace_minutes, charging_minutes, rain_mode")
       .eq("id", "main")
       .maybeSingle();
     if (!error && data) {
@@ -140,6 +146,9 @@ export function QueueProvider({ children }: PropsWithChildren) {
       }
       if (typeof data.charging_minutes === "number") {
         setChargingMinutes(data.charging_minutes);
+      }
+      if (typeof data.rain_mode === "boolean") {
+        setRainModeState(data.rain_mode);
       }
     }
   };
@@ -561,12 +570,20 @@ export function QueueProvider({ children }: PropsWithChildren) {
 
     await Promise.all([loadQueueEntries(), loadBays(), loadChargingSessions()]);
 
+    const entry = queueEntries.find(
+      (current) => current.id === session.queueEntryId,
+    );
+
     void logActivity({
       action: "session.end",
       actorName: session.saName,
       targetType: "charging_session",
       targetId: sessionId,
-      details: { bayId: session.bayId, actualDurationMinutes },
+      details: {
+        bayId: session.bayId,
+        plateNumber: entry?.plateNumber,
+        actualDurationMinutes,
+      },
     });
 
     return true;
@@ -600,10 +617,12 @@ export function QueueProvider({ children }: PropsWithChildren) {
       .eq("id", entryId);
     if (!error) {
       await loadQueueEntries();
+      const entry = getQueueEntryById(entryId);
       void logActivity({
         action: "queue.override_approve",
         targetType: "queue_entry",
         targetId: entryId,
+        details: { plateNumber: entry?.plateNumber },
       });
     }
   };
@@ -621,10 +640,12 @@ export function QueueProvider({ children }: PropsWithChildren) {
       .eq("id", entryId);
     if (!error) {
       await loadQueueEntries();
+      const entry = getQueueEntryById(entryId);
       void logActivity({
         action: "queue.override_reject",
         targetType: "queue_entry",
         targetId: entryId,
+        details: { plateNumber: entry?.plateNumber },
       });
     }
   };
@@ -701,6 +722,42 @@ export function QueueProvider({ children }: PropsWithChildren) {
     });
   };
 
+  const setRainMode = async (
+    enabled: boolean,
+    actor: { actorRole: "sa" | "manager"; actorName?: string },
+  ) => {
+    const previous = rainMode;
+    setRainModeState(enabled);
+
+    // showroom_settings' own UPDATE policy is manager/admin-only (it also
+    // guards manager-only fields like grace_minutes/charging_minutes), so
+    // this goes through a SECURITY DEFINER RPC scoped to just rain_mode that
+    // additionally allows the "sa" role.
+    const { error } = await supabase.rpc("set_rain_mode", {
+      p_enabled: enabled,
+    });
+
+    if (error) {
+      setRainModeState(previous);
+      throw new Error(error.message || "Failed to update rain mode.");
+    }
+
+    // Attributed explicitly from which panel (SA vs manager) triggered the
+    // toggle, rather than inferred from the shared Supabase Auth session —
+    // that session is a single global client persisted across tabs, so if
+    // an SA and a manager are both signed in on the same browser, whichever
+    // signed in most recently silently becomes "the current user" for every
+    // tab, misattributing actions.
+    void logActivity({
+      action: enabled ? "showroom_settings.rain_mode_on" : "showroom_settings.rain_mode_off",
+      actorRole: actor.actorRole,
+      actorName: actor.actorName,
+      targetType: "showroom_settings",
+      targetId: "main",
+      details: { enabled },
+    });
+  };
+
   const deleteBay = async (bayId: string) => {
     const { error } = await supabase.from("bays").delete().eq("id", bayId);
 
@@ -731,6 +788,8 @@ export function QueueProvider({ children }: PropsWithChildren) {
     activeSessions,
     pendingOverrideEntries,
     defaultChargingMinutes: chargingMinutes,
+    rainMode,
+    setRainMode,
     addQueueEntry,
     addStaffQueueEntry,
     getQueueEntryById,

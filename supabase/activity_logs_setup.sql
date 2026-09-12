@@ -32,3 +32,8 @@ drop policy if exists "manager_select_activity_logs" on public.activity_logs;
 create policy "manager_select_activity_logs"
 on public.activity_logs for select
 using (public.is_manager());
+
+-- Without this, postgres_changes subscribers never receive INSERT events
+-- (the "manager_select_activity_logs" RLS policy still gates who actually
+-- gets each row broadcast).
+alter publication supabase_realtime add table public.activity_logs;

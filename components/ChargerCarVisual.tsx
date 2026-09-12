@@ -4,7 +4,9 @@ import Animated, {
     Easing,
     useAnimatedProps,
     useSharedValue,
+    withDelay,
     withRepeat,
+    withSequence,
     withTiming,
 } from "react-native-reanimated";
 import Svg, {
@@ -13,10 +15,88 @@ import Svg, {
     Defs,
     Ellipse,
     G,
+    Line,
     Path,
     Rect,
     Text as SvgText,
 } from "react-native-svg";
+
+const AnimatedLine = Animated.createAnimatedComponent(Line);
+const AnimatedPath = Animated.createAnimatedComponent(Path);
+
+const RAINDROPS = [
+  { x: 24, y: -10, delay: 0 },
+  { x: 58, y: -30, delay: 220 },
+  { x: 92, y: -6, delay: 480 },
+  { x: 126, y: -22, delay: 120 },
+  { x: 160, y: -8, delay: 360 },
+  { x: 194, y: -26, delay: 600 },
+  { x: 210, y: -4, delay: 260 },
+];
+
+function Raindrop({ x, y, delay }: { x: number; y: number; delay: number }) {
+  const fall = useSharedValue(0);
+
+  useEffect(() => {
+    fall.value = withDelay(
+      delay,
+      withRepeat(withTiming(1, { duration: 900, easing: Easing.linear }), -1, false),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const animatedProps = useAnimatedProps(() => {
+    const ty = fall.value * 190;
+    const opacity = fall.value > 0.85 ? (1 - fall.value) / 0.15 : 1;
+    return {
+      x1: x,
+      x2: x - 4,
+      y1: y + ty,
+      y2: y + ty + 12,
+      opacity,
+    };
+  });
+
+  return (
+    <AnimatedLine
+      animatedProps={animatedProps}
+      stroke="#9FD3FF"
+      strokeWidth={2}
+      strokeLinecap="round"
+    />
+  );
+}
+
+function LightningBolt() {
+  const flash = useSharedValue(0);
+
+  useEffect(() => {
+    flash.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 90 }),
+        withTiming(0.15, { duration: 90 }),
+        withTiming(1, { duration: 70 }),
+        withTiming(0, { duration: 500 }),
+        withTiming(0, { duration: 1800 }),
+      ),
+      -1,
+      false,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const animatedProps = useAnimatedProps(() => ({
+    opacity: flash.value,
+  }));
+
+  return (
+    <AnimatedPath
+      animatedProps={animatedProps}
+      d="M148,4 L128,44 L142,44 L124,84 L158,38 L144,38 Z"
+      fill="#FFE066"
+    />
+  );
+}
 
 // Diagonal caution-tape stripes clipped to a rect, used to flag a disabled
 // bay the way a physical hazard barrier would.
@@ -118,10 +198,13 @@ export default function ChargerCarVisual({
   active,
   colorAccent = "#3CE685",
   disabled = false,
+  raining = false,
 }: {
   active: boolean;
   colorAccent?: string;
   disabled?: boolean;
+  /** Overlays a rain + lightning graphic to indicate heavy rain mode. */
+  raining?: boolean;
 }) {
   const ledOpacity = useSharedValue(0.35);
   const showDisabledGraphic = disabled && !active;
@@ -158,10 +241,21 @@ export default function ChargerCarVisual({
           fill="#39A0ED"
           opacity={0.16}
         />
-        <Circle cx={152} cy={34} r={13} fill="#F4F8FF" opacity={0.18} />
-        <Circle cx={167} cy={40} r={9} fill="#F4F8FF" opacity={0.18} />
-        <Circle cx={138} cy={40} r={9} fill="#F4F8FF" opacity={0.18} />
-        <Rect x={134} y={38} width={38} height={10} rx={5} fill="#F4F8FF" opacity={0.18} />
+        {raining ? (
+          <>
+            <Circle cx={152} cy={34} r={16} fill="#5C6B85" opacity={0.55} />
+            <Circle cx={172} cy={42} r={12} fill="#5C6B85" opacity={0.55} />
+            <Circle cx={132} cy={42} r={12} fill="#5C6B85" opacity={0.55} />
+            <Rect x={126} y={38} width={54} height={14} rx={7} fill="#5C6B85" opacity={0.55} />
+          </>
+        ) : (
+          <>
+            <Circle cx={152} cy={34} r={13} fill="#F4F8FF" opacity={0.18} />
+            <Circle cx={167} cy={40} r={9} fill="#F4F8FF" opacity={0.18} />
+            <Circle cx={138} cy={40} r={9} fill="#F4F8FF" opacity={0.18} />
+            <Rect x={134} y={38} width={38} height={10} rx={5} fill="#F4F8FF" opacity={0.18} />
+          </>
+        )}
 
         {/* Charger pedestal */}
         <Rect x={30} y={148} width={26} height={7} rx={3.5} fill="#0B1424" opacity={0.35} />
@@ -433,6 +527,16 @@ export default function ChargerCarVisual({
           </G>
         ) : null}
 
+        {/* Heavy rain overlay: falling raindrops + intermittent lightning */}
+        {raining ? (
+          <G>
+            <LightningBolt />
+            {RAINDROPS.map((drop, i) => (
+              <Raindrop key={i} x={drop.x} y={drop.y} delay={drop.delay} />
+            ))}
+          </G>
+        ) : null}
+
         {/* Hazard barrier across the bay, shown when disabled and idle */}
         {showDisabledGraphic ? (
           <>
@@ -451,7 +555,9 @@ export default function ChargerCarVisual({
           </>
         ) : null}
       </Svg>
-      {showDisabledGraphic ? (
+      {raining ? (
+        <Text style={styles.rainLabel}>⛈ Heavy rain</Text>
+      ) : showDisabledGraphic ? (
         <Text style={styles.disabledLabel}>Bay disabled</Text>
       ) : !active ? (
         <Text style={styles.idleLabel}>No vehicle connected</Text>
@@ -471,6 +577,13 @@ const styles = StyleSheet.create({
     color: "#8FA0C4",
     fontSize: 12,
     fontStyle: "italic",
+  },
+  rainLabel: {
+    position: "absolute",
+    bottom: 6,
+    color: "#9FD3FF",
+    fontSize: 12,
+    fontWeight: "700",
   },
   disabledLabel: {
     position: "absolute",

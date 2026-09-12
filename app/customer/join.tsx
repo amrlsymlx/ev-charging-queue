@@ -22,6 +22,14 @@ import PlateBadge from "../../components/PlateBadge";
 import { useQueue } from "../../context/QueueContext";
 import { showAlert } from "../../lib/alert";
 import { formatClockTime, formatCountdown } from "../../lib/eta";
+import {
+    evaluateSchedule,
+    fetchOperatingHours,
+    fetchUpcomingHolidays,
+    getOperatingDayRange,
+    OperatingHoursRow,
+    PublicHoliday,
+} from "../../lib/operatingHours";
 import { supabase } from "../../lib/supabase";
 
 function toRadians(value: number): number {
@@ -76,7 +84,7 @@ function toSafeBatteryValue(value: unknown): number {
 
 export default function CustomerJoinScreen() {
   const router = useRouter();
-  const { addQueueEntry, waitingEntries, bays, getEtaForPosition } =
+  const { addQueueEntry, waitingEntries, bays, getEtaForPosition, rainMode } =
     useQueue();
 
   const [name, setName] = useState("");
@@ -103,6 +111,26 @@ export default function CustomerJoinScreen() {
   const [agreed, setAgreed] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const [hoursRows, setHoursRows] = useState<OperatingHoursRow[]>([]);
+  const [holidays, setHolidays] = useState<PublicHoliday[]>([]);
+
+  useEffect(() => {
+    const loadOperatingHours = async () => {
+      try {
+        const [rows, holidayRows] = await Promise.all([
+          fetchOperatingHours(),
+          fetchUpcomingHolidays(),
+        ]);
+        setHoursRows(rows);
+        setHolidays(holidayRows);
+      } catch {
+        // Best-effort: if operating hours aren't configured yet, don't block joining.
+      }
+    };
+
+    void loadOperatingHours();
+  }, []);
 
   useEffect(() => {
     const loadShowroomSettings = async () => {
@@ -152,6 +180,12 @@ export default function CustomerJoinScreen() {
     return () => clearInterval(interval);
   }, []);
 
+  const scheduleEval = useMemo(() => {
+    if (hoursRows.length === 0) return null;
+    return evaluateSchedule(hoursRows, holidays);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoursRows, holidays, tick]);
+
   const estimatedWaitSeconds = useMemo(() => {
     try {
       const position = (waitingEntries || []).length + 1;
@@ -163,14 +197,15 @@ export default function CustomerJoinScreen() {
   }, [waitingEntries, bays, getEtaForPosition, tick]);
 
   const estimatedWait = useMemo(() => {
+    if (rainMode) return "Indefinite";
     if (estimatedWaitSeconds === null) return "--";
     return formatCountdown(estimatedWaitSeconds);
-  }, [estimatedWaitSeconds]);
+  }, [rainMode, estimatedWaitSeconds]);
 
   const estimatedStart = useMemo(() => {
-    if (estimatedWaitSeconds === null) return "--";
+    if (rainMode || estimatedWaitSeconds === null) return "--";
     return formatClockTime(new Date(Date.now() + estimatedWaitSeconds * 1000));
-  }, [estimatedWaitSeconds]);
+  }, [rainMode, estimatedWaitSeconds]);
 
   const parsedCurrentLat = Number(currentLatitude);
   const parsedCurrentLng = Number(currentLongitude);
@@ -236,6 +271,11 @@ export default function CustomerJoinScreen() {
   }, []);
 
   const handleSubmit = async () => {
+    if (scheduleEval && !scheduleEval.canRegister) {
+      setMessage(scheduleEval.message);
+      return;
+    }
+
     if (!agreed) {
       setMessage("You must agree to the Terms & Conditions before proceeding.");
       return;
@@ -293,6 +333,34 @@ export default function CustomerJoinScreen() {
       showAlert(
         "Plate blocked",
         `${blockedPlate}\n\nThis plate number is blocked from using our charger due violation of our T&C.`,
+      );
+      return;
+    }
+
+    // One charging queue per plate per operating day — the window runs from
+    // this weekday's opening time to the next, not calendar midnight, so it
+    // matches the showroom's actual business day rather than the clock.
+    const { start: operatingDayStart, end: operatingDayEnd } =
+      getOperatingDayRange(hoursRows, holidays);
+
+    const { data: queuedToday, error: queuedTodayError } = await supabase.rpc(
+      "has_plate_queued_today",
+      {
+        p_plate: formattedPlate || formatPlateNumber(plateNumber),
+        p_day_start: operatingDayStart.toISOString(),
+        p_day_end: operatingDayEnd.toISOString(),
+      },
+    );
+
+    if (queuedTodayError) {
+      setMessage(queuedTodayError.message);
+      return;
+    }
+
+    if (queuedToday) {
+      showAlert(
+        "Already queued today",
+        "This plate number has already joined the charging queue today. Please try again tomorrow.",
       );
       return;
     }
@@ -390,6 +458,20 @@ export default function CustomerJoinScreen() {
               ? ` (Start charging at ${estimatedStart})`
               : ""}
           </Text>
+          {rainMode ? (
+            <View style={styles.closedBanner}>
+              <Ionicons name="thunderstorm-outline" size={16} color="#9FD3FF" />
+              <Text style={styles.closedBannerText}>
+                Heavy rain mode — wait times are currently indefinite.
+              </Text>
+            </View>
+          ) : null}
+          {scheduleEval && !scheduleEval.canRegister ? (
+            <View style={styles.closedBanner}>
+              <Ionicons name="time-outline" size={16} color="#FFD0A8" />
+              <Text style={styles.closedBannerText}>{scheduleEval.message}</Text>
+            </View>
+          ) : null}
           <Animated.View
             style={
               gpsStatus === "valid"
@@ -572,15 +654,24 @@ export default function CustomerJoinScreen() {
           <Pressable
             style={[
               styles.primaryButton,
-              (!agreed || submitting) && styles.disabledButton,
+              (!agreed ||
+                submitting ||
+                (scheduleEval ? !scheduleEval.canRegister : false)) &&
+                styles.disabledButton,
             ]}
             onPress={() => {
               void handleSubmit();
             }}
-            disabled={!agreed || submitting}
+            disabled={
+              !agreed ||
+              submitting ||
+              (scheduleEval ? !scheduleEval.canRegister : false)
+            }
           >
             {submitting ? (
               <ActivityIndicator color="#FFF6F2" />
+            ) : scheduleEval && !scheduleEval.canRegister ? (
+              <Text style={styles.primaryButtonText}>Queue Closed</Text>
             ) : (
               <Text style={styles.primaryButtonText}>
                 {gpsStatus === "valid"
@@ -592,27 +683,8 @@ export default function CustomerJoinScreen() {
         </View>
 
         <Pressable
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            marginTop: 12,
-          }}
-          onPress={() => router.push("/customer/track")}
-          accessibilityLabel="Track Queue"
-        >
-          <Ionicons
-            name="search"
-            size={16}
-            color="#C4D2FF"
-            style={{ marginRight: 8 }}
-          />
-          <Text style={styles.linkText}>Track Queue</Text>
-        </Pressable>
-
-        <Pressable
-          style={{ alignItems: "center", marginTop: 8 }}
-          onPress={() => router.push("/")}
+          style={{ alignItems: "center", marginTop: 12 }}
+          onPress={() => router.push("/customer")}
         >
           <Text style={styles.linkText}>Back to main page</Text>
         </Pressable>
@@ -736,6 +808,23 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   linkText: { color: "#C4D2FF", textAlign: "center" },
+  closedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    alignSelf: "center",
+    backgroundColor: "rgba(255, 208, 168, 0.14)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  closedBannerText: {
+    color: "#FFD0A8",
+    fontSize: 13,
+    textAlign: "center",
+  },
   input: {
     borderWidth: 0,
     borderColor: "transparent",

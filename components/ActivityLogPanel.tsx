@@ -1,11 +1,8 @@
 import { supabase } from "@/lib/supabase";
-import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
-    SafeAreaView,
-    ScrollView,
     StyleSheet,
     Text,
     View,
@@ -68,8 +65,12 @@ function formatTimestamp(iso: string): string {
 
 const PAGE_SIZE = 50;
 
-export default function ActivityLogScreen() {
-  const router = useRouter();
+type Props = {
+  /** Shows the role filter chips and "Load More" pagination. */
+  showFilters?: boolean;
+};
+
+export default function ActivityLogPanel({ showFilters = true }: Props) {
   const [logs, setLogs] = useState<ActivityLogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -132,131 +133,137 @@ export default function ActivityLogScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roleFilter]);
 
+  // Live-append new log rows as they're written, instead of requiring a
+  // manual refresh. Supabase caches channels by name; a unique suffix per
+  // mount avoids colliding with a stale channel left over from a fast
+  // refresh / double-mount.
+  useEffect(() => {
+    const channel = supabase
+      .channel(`public:activity_logs:${Math.random().toString(36).slice(2)}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "activity_logs" },
+        (payload) => {
+          const row = payload.new as ActivityLogRow;
+          if (roleFilter !== "all" && row.actor_role !== roleFilter) return;
+          setLogs((prev) =>
+            prev.some((log) => log.id === row.id) ? prev : [row, ...prev],
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roleFilter]);
+
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Activity Log</Text>
-          <Text style={styles.subtitle}>
-            Every customer, SA, and manager action, most recent first.
-          </Text>
-
-          <View style={styles.filterRow}>
-            {ROLE_FILTERS.map((filter) => (
-              <Pressable
-                key={filter}
+    <>
+      {showFilters ? (
+        <View style={styles.filterRow}>
+          {ROLE_FILTERS.map((filter) => (
+            <Pressable
+              key={filter}
+              style={[
+                styles.filterChip,
+                roleFilter === filter && styles.filterChipSelected,
+              ]}
+              onPress={() => setRoleFilter(filter)}
+            >
+              <Text
                 style={[
-                  styles.filterChip,
-                  roleFilter === filter && styles.filterChipSelected,
+                  styles.filterChipText,
+                  roleFilter === filter && styles.filterChipTextSelected,
                 ]}
-                onPress={() => setRoleFilter(filter)}
               >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    roleFilter === filter && styles.filterChipTextSelected,
-                  ]}
-                >
-                  {filter === "all" ? "All" : ROLE_LABEL[filter]}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {message ? <Text style={styles.message}>{message}</Text> : null}
+                {filter === "all" ? "All" : ROLE_LABEL[filter]}
+              </Text>
+            </Pressable>
+          ))}
         </View>
+      ) : null}
 
-        <View style={styles.card}>
-          {loading ? (
-            <ActivityIndicator color="#D1DCF3" />
-          ) : logs.length === 0 ? (
-            <Text style={styles.row}>No activity recorded yet.</Text>
-          ) : (
-            <View style={styles.listWrapper}>
-              {logs.map((log, idx) => {
-                const detailsText = formatDetails(log.details);
-                return (
+      {message ? <Text style={styles.message}>{message}</Text> : null}
+
+      {loading ? (
+        <ActivityIndicator color="#D1DCF3" />
+      ) : logs.length === 0 ? (
+        <Text style={styles.row}>No activity recorded yet.</Text>
+      ) : (
+        <View style={styles.listWrapper}>
+          {logs.map((log, idx) => {
+            const detailsText = formatDetails(log.details);
+            return (
+              <View
+                key={log.id}
+                style={[
+                  styles.logRow,
+                  idx !== logs.length - 1 && styles.logDivider,
+                ]}
+              >
+                <View style={styles.logHeaderRow}>
                   <View
-                    key={log.id}
                     style={[
-                      styles.logRow,
-                      idx !== logs.length - 1 && styles.logDivider,
+                      styles.roleBadge,
+                      { backgroundColor: `${ROLE_COLOR[log.actor_role]}22` },
                     ]}
                   >
-                    <View style={styles.logHeaderRow}>
-                      <View
-                        style={[
-                          styles.roleBadge,
-                          { backgroundColor: `${ROLE_COLOR[log.actor_role]}22` },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.roleBadgeText,
-                            { color: ROLE_COLOR[log.actor_role] },
-                          ]}
-                        >
-                          {ROLE_LABEL[log.actor_role]}
-                        </Text>
-                      </View>
-                      <Text style={styles.logTimestamp}>
-                        {formatTimestamp(log.created_at)}
-                      </Text>
-                    </View>
-                    <Text style={styles.logAction}>
-                      {formatAction(log.action)}
-                      {log.actor_name ? (
-                        <Text style={styles.logActor}> — {log.actor_name}</Text>
-                      ) : null}
+                    <Text
+                      style={[
+                        styles.roleBadgeText,
+                        { color: ROLE_COLOR[log.actor_role] },
+                      ]}
+                    >
+                      {ROLE_LABEL[log.actor_role]}
                     </Text>
-                    {detailsText ? (
-                      <Text style={styles.logDetails} numberOfLines={3}>
-                        {detailsText}
-                      </Text>
-                    ) : null}
                   </View>
-                );
-              })}
-            </View>
-          )}
-
-          {!loading && hasMore ? (
-            <Pressable
-              style={styles.loadMoreButton}
-              onPress={loadMore}
-              disabled={loadingMore}
-            >
-              {loadingMore ? (
-                <ActivityIndicator color="#D1DCF3" />
-              ) : (
-                <Text style={styles.loadMoreButtonText}>Load More</Text>
-              )}
-            </Pressable>
-          ) : null}
+                  <Text style={styles.logTimestamp}>
+                    {formatTimestamp(log.created_at)}
+                  </Text>
+                </View>
+                <Text style={styles.logAction}>
+                  {formatAction(log.action)}
+                  {log.actor_name ? (
+                    <Text style={styles.logActor}> — {log.actor_name}</Text>
+                  ) : null}
+                </Text>
+                {detailsText ? (
+                  <Text style={styles.logDetails} numberOfLines={3}>
+                    {detailsText}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })}
         </View>
-      </ScrollView>
+      )}
 
-      <Pressable
-        style={{ alignItems: "center", marginTop: 12, marginBottom: 12 }}
-        onPress={() => router.back()}
-      >
-        <Text style={styles.linkText}>Back to Settings</Text>
-      </Pressable>
-    </SafeAreaView>
+      {showFilters && !loading && hasMore ? (
+        <Pressable
+          style={styles.loadMoreButton}
+          onPress={loadMore}
+          disabled={loadingMore}
+        >
+          {loadingMore ? (
+            <ActivityIndicator color="#D1DCF3" />
+          ) : (
+            <Text style={styles.loadMoreButtonText}>Load More</Text>
+          )}
+        </Pressable>
+      ) : null}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#070D1A" },
-  content: { padding: 16, gap: 12 },
-  card: {
-    backgroundColor: "rgba(255,255,255,0.04)",
-    padding: 16,
-    borderRadius: 12,
+  filterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 8,
   },
-  title: { fontSize: 20, color: "#F6FAFF", fontWeight: "700" },
-  subtitle: { color: "#9FB0CD", marginBottom: 12, lineHeight: 18 },
-  filterRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   filterChip: {
     paddingVertical: 8,
     paddingHorizontal: 14,
@@ -273,7 +280,6 @@ const styles = StyleSheet.create({
   },
   filterChipTextSelected: { color: "#F8FBFF" },
   message: { color: "#FFD0A8", marginTop: 8 },
-  linkText: { color: "#C4D2FF", textAlign: "center" },
   row: { color: "#D1DCF3", paddingVertical: 10 },
   listWrapper: {
     backgroundColor: "rgba(255,255,255,0.05)",

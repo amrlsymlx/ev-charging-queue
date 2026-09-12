@@ -53,8 +53,8 @@ export default function RootLayout() {
           options={{ title: "Terms & Conditions" }}
         />
         <Stack.Screen
-          name="admin/settings/logs"
-          options={{ title: "Activity Log" }}
+          name="admin/settings/operating-hours"
+          options={{ title: "Operating Hours" }}
         />
       </Stack>
     </QueueProvider>

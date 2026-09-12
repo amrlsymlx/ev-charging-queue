@@ -50,13 +50,19 @@ export default function CustomerLandingScreen() {
               <Text style={styles.secondaryButtonText}>Track Queue</Text>
             </Pressable>
           </Link>
-        </View>
 
-        <Link href="/" asChild>
-          <Pressable style={{ alignItems: "center", marginTop: 12 }}>
-            <Text style={styles.linkText}>Back to main page</Text>
-          </Pressable>
-        </Link>
+          <Link href="/public/board?from=customer" asChild>
+            <Pressable style={styles.secondaryButtonRow}>
+              <Ionicons
+                name="tv-outline"
+                size={16}
+                color="#EAF2FF"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.secondaryButtonText}>Public Queue Board</Text>
+            </Pressable>
+          </Link>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -141,7 +147,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  linkText: { color: "#C4D2FF", textAlign: "center", marginTop: 6 },
   headingCentered: { textAlign: "center", width: "100%" },
   bgGlowOne: {
     position: "absolute",
