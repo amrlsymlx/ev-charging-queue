@@ -144,12 +144,14 @@ export default function PublicBoardPanel({
     <>
       {embedded ? null : <Text style={styles.heading}>Live Queue Board</Text>}
 
-      <Text style={[styles.subheading, styles.etaBadge]}>
-        Estimated wait: {estimatedWait}
-        {estimatedStart !== "--"
-          ? ` (Start charging at ${estimatedStart})`
-          : ""}
-      </Text>
+      {isShowroomOpen ? (
+        <Text style={[styles.subheading, styles.etaBadge]}>
+          Estimated wait: {estimatedWait}
+          {estimatedStart !== "--"
+            ? ` (Start charging at ${estimatedStart})`
+            : ""}
+        </Text>
+      ) : null}
 
       {rainMode ? (
         <View style={styles.statusBannerRain}>
@@ -392,9 +394,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#070D1A",
   },
   content: {
-    padding: 18,
-    gap: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
     paddingBottom: 28,
+    gap: 14,
+    alignItems: "center",
   },
   embedded: {
     gap: 14,
@@ -440,9 +444,17 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.12)",
     borderWidth: 0,
     borderColor: "transparent",
-    borderRadius: 16,
+    borderRadius: 24,
     padding: 14,
     gap: 8,
+    shadowColor: "#000000",
+    shadowOpacity: 0.28,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 10,
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
   },
   sectionCardBays: {
     backgroundColor: "rgba(124, 255, 186, 0.10)",

@@ -206,7 +206,10 @@ export default function AdminDashboard() {
     setLoadingBlockedPlateCount(false);
   };
 
-  const onDeleteSAAccount = async (emailOrId: string) => {
+  const onDeleteSAAccount = async (
+    emailOrId: string,
+    isManagerAccount = false,
+  ) => {
     if (checkingAuth) {
       showAlert("Please wait", "Checking authorization. Try again shortly.");
       return;
@@ -223,7 +226,12 @@ export default function AdminDashboard() {
       return;
     }
 
-    showAlert("Delete SA", "Delete selected SA account?", [
+    showAlert(
+      isManagerAccount ? "Delete Manager" : "Delete SA",
+      isManagerAccount
+        ? "Confirm manager account deletion?"
+        : "Delete selected SA account?",
+      [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
@@ -279,7 +287,12 @@ export default function AdminDashboard() {
               }
             }
 
-            showAlert("Success", "SA account deletion success.");
+            showAlert(
+              "Success",
+              isManagerAccount
+                ? "Manager account deletion success."
+                : "SA account deletion success.",
+            );
             await loadAccounts();
           } catch (err: any) {
             setMessage(
@@ -654,85 +667,87 @@ export default function AdminDashboard() {
               </Pressable>
             )}
 
-            <Pressable
-              style={styles.menuItem}
-              onPress={async () => {
-                setOpenMenuFor(null);
-                const newPass = await promptForInput(
-                  `Reset password for ${account.email}`,
-                  "Enter new password",
-                );
-                if (!newPass) return;
-
-                try {
-                  const {
-                    data: { session },
-                  } = await supabase.auth.getSession();
-
-                  if (!session?.access_token) {
-                    setMessage("Manager session missing. Please Login again.");
-                    return;
-                  }
-
-                  const payload = {
-                    email: account.email,
-                    password: newPass,
-                  };
-
-                  const res = await supabase.functions.invoke(
-                    "reset-sa-password",
-                    {
-                      body: payload,
-                      headers: {
-                        Authorization: `Bearer ${session.access_token}`,
-                      },
-                    },
+            {isManagerAccount ? null : (
+              <Pressable
+                style={styles.menuItem}
+                onPress={async () => {
+                  setOpenMenuFor(null);
+                  const newPass = await promptForInput(
+                    `Reset password for ${account.email}`,
+                    "Enter new password",
                   );
+                  if (!newPass) return;
 
-                  if (res.error) {
-                    const host = new URL(SUPABASE_URL).host;
-                    const projectRef = host.split(".")[0];
-                    const fnUrl = projectRef
-                      ? `https://${projectRef}.functions.supabase.co/reset-sa-password`
-                      : null;
-                    if (!fnUrl)
-                      throw new Error(
-                        res.error.message || "Function invoke failed",
-                      );
+                  try {
+                    const {
+                      data: { session },
+                    } = await supabase.auth.getSession();
 
-                    const fallback = await fetch(fnUrl, {
-                      method: "POST",
-                      headers: {
-                        "Content-Type": "application/json",
-                        Authorization: `Bearer ${session.access_token}`,
-                      },
-                      body: JSON.stringify(payload),
-                    });
-
-                    if (!fallback.ok) {
-                      const txt = await fallback.text();
-                      throw new Error(`HTTP ${fallback.status}: ${txt}`);
+                    if (!session?.access_token) {
+                      setMessage("Manager session missing. Please Login again.");
+                      return;
                     }
-                  }
 
-                  setMessage("Password reset.");
-                  await loadAccounts();
-                } catch (err: any) {
-                  setMessage(
-                    err?.message ||
-                      "Failed to reset password. Ensure reset function is deployed.",
-                  );
-                }
-              }}
-            >
-              <Text style={styles.menuText}>Reset Password</Text>
-            </Pressable>
+                    const payload = {
+                      email: account.email,
+                      password: newPass,
+                    };
+
+                    const res = await supabase.functions.invoke(
+                      "reset-sa-password",
+                      {
+                        body: payload,
+                        headers: {
+                          Authorization: `Bearer ${session.access_token}`,
+                        },
+                      },
+                    );
+
+                    if (res.error) {
+                      const host = new URL(SUPABASE_URL).host;
+                      const projectRef = host.split(".")[0];
+                      const fnUrl = projectRef
+                        ? `https://${projectRef}.functions.supabase.co/reset-sa-password`
+                        : null;
+                      if (!fnUrl)
+                        throw new Error(
+                          res.error.message || "Function invoke failed",
+                        );
+
+                      const fallback = await fetch(fnUrl, {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: `Bearer ${session.access_token}`,
+                        },
+                        body: JSON.stringify(payload),
+                      });
+
+                      if (!fallback.ok) {
+                        const txt = await fallback.text();
+                        throw new Error(`HTTP ${fallback.status}: ${txt}`);
+                      }
+                    }
+
+                    setMessage("Password reset.");
+                    await loadAccounts();
+                  } catch (err: any) {
+                    setMessage(
+                      err?.message ||
+                        "Failed to reset password. Ensure reset function is deployed.",
+                    );
+                  }
+                }}
+              >
+                <Text style={styles.menuText}>Reset Password</Text>
+              </Pressable>
+            )}
 
             <Pressable
               style={styles.menuItem}
               onPress={() => {
                 setOpenMenuFor(null);
-                onDeleteSAAccount(account.email);
+                onDeleteSAAccount(account.email, isManagerAccount);
               }}
             >
               <Text style={[styles.menuText, { color: "#FFB3A0" }]}>
