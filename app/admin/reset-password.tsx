@@ -1,7 +1,8 @@
 import { showAlert } from "@/lib/alert";
 import { supabase } from "@/lib/supabase";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
     Pressable,
@@ -11,6 +12,29 @@ import {
     TextInput,
     View,
 } from "react-native";
+
+const PASSWORD_RULES = [
+  {
+    key: "length",
+    label: "At least 8 characters",
+    test: (value: string) => value.length >= 8,
+  },
+  {
+    key: "uppercase",
+    label: "At least one uppercase letter",
+    test: (value: string) => /[A-Z]/.test(value),
+  },
+  {
+    key: "number",
+    label: "At least one number",
+    test: (value: string) => /[0-9]/.test(value),
+  },
+  {
+    key: "special",
+    label: "At least one special character",
+    test: (value: string) => /[^A-Za-z0-9]/.test(value),
+  },
+];
 
 // Supabase's password-recovery email links back to this screen with
 // access_token/refresh_token in the URL (query on native deep links, hash
@@ -37,8 +61,23 @@ export default function AdminResetPasswordScreen() {
   const [isInvite, setIsInvite] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  const ruleResults = useMemo(
+    () =>
+      PASSWORD_RULES.map((rule) => ({
+        ...rule,
+        met: rule.test(newPassword),
+      })),
+    [newPassword],
+  );
+  const passwordValid = ruleResults.every((rule) => rule.met);
+  const passwordsMatch =
+    confirmPassword.length > 0 && newPassword === confirmPassword;
+  const canSubmit = passwordValid && passwordsMatch && !saving;
 
   useEffect(() => {
     (async () => {
@@ -94,12 +133,12 @@ export default function AdminResetPasswordScreen() {
   }, []);
 
   const onSubmit = async () => {
-    if (!newPassword || newPassword.length < 6) {
-      setMessage("Password must be at least 6 characters.");
+    if (!passwordValid) {
+      setMessage("Password does not meet all requirements.");
       return;
     }
 
-    if (newPassword !== confirmPassword) {
+    if (!passwordsMatch) {
       setMessage("Passwords do not match.");
       return;
     }
@@ -160,29 +199,80 @@ export default function AdminResetPasswordScreen() {
                 : "Enter a new password."}
             </Text>
 
-            <TextInput
-              style={styles.input}
-              value={newPassword}
-              onChangeText={setNewPassword}
-              placeholder="New Password"
-              placeholderTextColor="#7E8EA8"
-              secureTextEntry
-              autoCapitalize="none"
-            />
-            <TextInput
-              style={styles.input}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="Confirm Password"
-              placeholderTextColor="#7E8EA8"
-              secureTextEntry
-              autoCapitalize="none"
-            />
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.inputFlex}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                placeholder="New Password"
+                placeholderTextColor="#7E8EA8"
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+              />
+              <Pressable
+                onPress={() => setShowPassword((s) => !s)}
+                style={styles.eyeButton}
+              >
+                <Ionicons
+                  name={showPassword ? "eye" : "eye-off"}
+                  size={20}
+                  color="#9FB0CD"
+                />
+              </Pressable>
+            </View>
+
+            {newPassword.length > 0 ? (
+              <View style={styles.ruleList}>
+                {ruleResults.map((rule) => (
+                  <View key={rule.key} style={styles.ruleRow}>
+                    <Ionicons
+                      name={rule.met ? "checkmark-circle" : "close-circle"}
+                      size={16}
+                      color={rule.met ? "#7FE0A8" : "#FF9B9B"}
+                    />
+                    <Text
+                      style={[
+                        styles.ruleText,
+                        rule.met && styles.ruleTextMet,
+                      ]}
+                    >
+                      {rule.label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.inputFlex}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                placeholder="Confirm Password"
+                placeholderTextColor="#7E8EA8"
+                secureTextEntry={!showConfirmPassword}
+                autoCapitalize="none"
+              />
+              <Pressable
+                onPress={() => setShowConfirmPassword((s) => !s)}
+                style={styles.eyeButton}
+              >
+                <Ionicons
+                  name={showConfirmPassword ? "eye" : "eye-off"}
+                  size={20}
+                  color="#9FB0CD"
+                />
+              </Pressable>
+            </View>
+
+            {confirmPassword.length > 0 && !passwordsMatch ? (
+              <Text style={styles.mismatchText}>Passwords do not match.</Text>
+            ) : null}
 
             <Pressable
-              style={[styles.button, saving && styles.buttonDisabled]}
+              style={[styles.button, !canSubmit && styles.buttonDisabled]}
               onPress={onSubmit}
-              disabled={saving}
+              disabled={!canSubmit}
             >
               {saving ? (
                 <ActivityIndicator color="#FFF" />
@@ -224,14 +314,46 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   subtitle: { color: "#D1DCF3", marginBottom: 12, textAlign: "center" },
-  input: {
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  inputFlex: {
+    flex: 1,
     borderWidth: 0,
     borderColor: "transparent",
     borderRadius: 10,
-    padding: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     backgroundColor: "rgba(255,255,255,0.08)",
     color: "#F4F8FF",
+  },
+  eyeButton: {
+    padding: 8,
+    marginLeft: 6,
+  },
+  ruleList: {
     marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  ruleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  ruleText: {
+    color: "#D1DCF3",
+    marginLeft: 6,
+    fontSize: 13,
+  },
+  ruleTextMet: {
+    color: "#7FE0A8",
+  },
+  mismatchText: {
+    color: "#FF9B9B",
+    marginBottom: 10,
+    fontSize: 13,
   },
   button: {
     backgroundColor: "rgba(255,255,255,0.16)",
