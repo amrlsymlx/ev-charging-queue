@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 // @ts-ignore: optional native dependency may not be installed in web/dev environment
 import Slider from "@react-native-community/slider";
+import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -164,13 +165,46 @@ export default function CustomerJoinScreen() {
     void loadShowroomSettings();
   }, []);
 
+  const [locatingDevice, setLocatingDevice] = useState(false);
+
   const handleRetryLocation = async () => {
-    setMessage(
-      "Retrying location... (permission/location logic not yet implemented)",
-    );
-    console.debug("Retrying location request - placeholder");
-    // Future: trigger permissions and attempt to read device location here.
+    setLocatingDevice(true);
+    setMessage(null);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setCurrentLatitude("");
+        setCurrentLongitude("");
+        setMessage(
+          "Location permission denied. Please enable location access and try again.",
+        );
+        return;
+      }
+
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      setCurrentLatitude(position.coords.latitude.toFixed(6));
+      setCurrentLongitude(position.coords.longitude.toFixed(6));
+    } catch (err: any) {
+      setCurrentLatitude("");
+      setCurrentLongitude("");
+      setMessage(
+        err?.message || "Failed to get your location. Please try again.",
+      );
+    } finally {
+      setLocatingDevice(false);
+    }
   };
+
+  // Auto-request the device's real GPS location once showroom settings have
+  // loaded, unless the manual GPS test picker is enabled (used for testing
+  // on devices/browsers where a real fix isn't practical).
+  useEffect(() => {
+    if (loadingSettings || gpsTestEnabled) return;
+    void handleRetryLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadingSettings, gpsTestEnabled]);
 
   // Ticks every second so the live estimate below stays in sync with the
   // actual bay countdowns it's derived from.
@@ -445,12 +479,14 @@ export default function CustomerJoinScreen() {
           <Text style={[styles.sectionTitle, styles.sectionTitleCentered]}>
             Queue Register
           </Text>
-          <Text style={[styles.etaBadge, styles.caption]}>
-            Estimated wait: {estimatedWait}
-            {estimatedStart && estimatedStart !== "--"
-              ? ` (Start charging at ${estimatedStart})`
-              : ""}
-          </Text>
+          {!scheduleEval || scheduleEval.isWithinOperatingHours ? (
+            <Text style={[styles.etaBadge, styles.caption]}>
+              Estimated wait: {estimatedWait}
+              {estimatedStart && estimatedStart !== "--"
+                ? ` (Start charging at ${estimatedStart})`
+                : ""}
+            </Text>
+          ) : null}
           {rainMode ? (
             <View style={styles.closedBanner}>
               <Ionicons name="thunderstorm-outline" size={16} color="#9FD3FF" />
@@ -505,14 +541,19 @@ export default function CustomerJoinScreen() {
               Error. Ask SA on duty to approve.
             </Text>
           )}
-          {gpsStatus !== "valid" ? (
+          {gpsStatus !== "valid" && !gpsTestEnabled ? (
             <Pressable
-              style={styles.retryButton}
+              style={[styles.retryButton, locatingDevice && styles.disabledButton]}
               onPress={() => {
                 void handleRetryLocation();
               }}
+              disabled={locatingDevice}
             >
-              <Text style={styles.retryButtonText}>Try again</Text>
+              {locatingDevice ? (
+                <ActivityIndicator color="#C4D2FF" />
+              ) : (
+                <Text style={styles.retryButtonText}>Try again</Text>
+              )}
             </Pressable>
           ) : null}
           <TextInput
