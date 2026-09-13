@@ -4,10 +4,9 @@ import {
   getSecureItem,
   setSecureItem,
 } from "@/lib/secureStorage";
-import { supabase } from "@/lib/supabase";
+import { SITE_URL, supabase } from "@/lib/supabase";
 import { Ionicons } from "@expo/vector-icons";
 import type { User } from "@supabase/supabase-js";
-import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -113,7 +112,7 @@ export default function AdminLoginScreen() {
 
     const { error } = await supabase.auth.resetPasswordForEmail(
       normalizedEmail,
-      { redirectTo: Linking.createURL("/admin/reset-password") },
+      { redirectTo: `${SITE_URL}/admin/reset-password` },
     );
 
     setForgotSending(false);

@@ -1,7 +1,6 @@
 import { showAlert } from "@/lib/alert";
-import { SUPABASE_URL, supabase } from "@/lib/supabase";
+import { SITE_URL, SUPABASE_URL, supabase } from "@/lib/supabase";
 import { useRouter } from "expo-router";
-import * as Linking from "expo-linking";
 import { useState } from "react";
 import {
     ActivityIndicator,
@@ -62,7 +61,7 @@ export default function CreateManagerScreen() {
       const payload = {
         email: normalizedEmail,
         name: trimmedName,
-        redirectTo: Linking.createURL("/admin/reset-password"),
+        redirectTo: `${SITE_URL}/admin/reset-password`,
       };
 
       const res = await supabase.functions.invoke("create-manager-account", {

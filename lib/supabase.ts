@@ -23,6 +23,19 @@ export const SUPABASE_ANON_KEY =
   process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
   "";
 
+// The deployed web app's canonical origin. Auth redirect links (password
+// reset, manager invites) must always point here — Supabase only honors a
+// redirectTo that exactly matches an entry in its Redirect URLs allow list,
+// so deriving this from window.location.origin would break whenever the
+// flow is triggered from a preview deploy or a local dev server, silently
+// falling back to the Site URL (the app's index page) instead.
+export const SITE_URL =
+  extras?.SITE_URL ||
+  extras?.EXPO_PUBLIC_SITE_URL ||
+  process.env.SITE_URL ||
+  process.env.EXPO_PUBLIC_SITE_URL ||
+  "https://kpachargemanage.netlify.app";
+
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   // eslint-disable-next-line no-console
   console.warn(
