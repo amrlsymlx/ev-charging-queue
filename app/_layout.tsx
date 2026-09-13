@@ -1,10 +1,21 @@
+import Head from "expo-router/head";
 import { Stack } from "expo-router";
 
-import { QueueProvider } from "@/context/QueueContext";
+import { QueueProvider, useQueue } from "@/context/QueueContext";
+
+function DocumentTitle() {
+  const { showroomName } = useQueue();
+  return (
+    <Head>
+      <title>{`${showroomName} Charger`}</title>
+    </Head>
+  );
+}
 
 export default function RootLayout() {
   return (
     <QueueProvider>
+      <DocumentTitle />
       <Stack
         screenOptions={{
           headerShown: false,

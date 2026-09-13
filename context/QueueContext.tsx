@@ -29,6 +29,7 @@ interface QueueContextValue {
   activeSessions: ChargingSession[];
   pendingOverrideEntries: QueueEntry[];
   defaultChargingMinutes: number;
+  showroomName: string;
   rainMode: boolean;
   setRainMode: (
     enabled: boolean,
@@ -132,6 +133,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
   const [graceMinutes, setGraceMinutes] = useState(GRACE_MINUTES);
   const [chargingMinutes, setChargingMinutes] = useState(CHARGING_MINUTES);
   const [rainMode, setRainModeState] = useState(false);
+  const [showroomName, setShowroomName] = useState("Main Showroom");
 
   const isStaffRef = useRef(isStaff);
   isStaffRef.current = isStaff;
@@ -141,7 +143,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
   const loadTimerSettings = async () => {
     const { data, error } = await supabase
       .from("showroom_settings")
-      .select("grace_minutes, charging_minutes, rain_mode")
+      .select("grace_minutes, charging_minutes, rain_mode, showroom_name")
       .eq("id", "main")
       .maybeSingle();
     if (!error && data) {
@@ -153,6 +155,9 @@ export function QueueProvider({ children }: PropsWithChildren) {
       }
       if (typeof data.rain_mode === "boolean") {
         setRainModeState(data.rain_mode);
+      }
+      if (typeof data.showroom_name === "string" && data.showroom_name) {
+        setShowroomName(data.showroom_name);
       }
     }
   };
@@ -890,6 +895,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
     activeSessions,
     pendingOverrideEntries,
     defaultChargingMinutes: chargingMinutes,
+    showroomName,
     rainMode,
     setRainMode,
     addQueueEntry,
