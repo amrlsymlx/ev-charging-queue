@@ -1,7 +1,11 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createClient } from "@supabase/supabase-js";
 import Constants from "expo-constants";
 import "react-native-url-polyfill/auto";
+import {
+  deleteSecureItem,
+  getSecureItem,
+  setSecureItem,
+} from "./secureStorage";
 
 // Read keys from Expo `extra` config or environment for local dev.
 const extras =
@@ -43,13 +47,22 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   );
 }
 
-// AsyncStorage touches `window`, which doesn't exist during Expo Router's web SSR pass.
+// getSecureItem/setSecureItem/deleteSecureItem touch `window` on web, which
+// doesn't exist during Expo Router's web SSR pass.
 const noopStorage = {
   getItem: async () => null,
   setItem: async () => {},
   removeItem: async () => {},
 };
-const authStorage = typeof window === "undefined" ? noopStorage : AsyncStorage;
+// Native: session (access/refresh tokens) goes through expo-secure-store,
+// backed by the OS keychain/keystore, instead of plaintext AsyncStorage.
+const secureAuthStorage = {
+  getItem: getSecureItem,
+  setItem: setSecureItem,
+  removeItem: deleteSecureItem,
+};
+const authStorage =
+  typeof window === "undefined" ? noopStorage : secureAuthStorage;
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {

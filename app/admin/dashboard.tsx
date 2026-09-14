@@ -29,7 +29,6 @@ type SAAccount = {
   name: string;
   email: string;
   role: string;
-  password_plaintext?: string | null;
 };
 
 // SA/manager-created entries (addStaffQueueEntry) store the category itself
@@ -89,6 +88,8 @@ export default function AdminDashboard() {
   const [openMenuFor, setOpenMenuFor] = useState<string | null>(null);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [modalAccount, setModalAccount] = useState<SAAccount | null>(null);
+  const [modalPassword, setModalPassword] = useState<string | null>(null);
+  const [modalPasswordLoading, setModalPasswordLoading] = useState(false);
   const [modalMessage, setModalMessage] = useState<string | null>(null);
   const [showSaListModal, setShowSaListModal] = useState(false);
   const [showManagerListModal, setShowManagerListModal] = useState(false);
@@ -166,7 +167,7 @@ export default function AdminDashboard() {
     setLoadingAccounts(true);
     const { data, error } = await supabase
       .from("sa_users")
-      .select("id, name, email, role, password_plaintext")
+      .select("id, name, email, role")
       .order("created_at", { ascending: false });
     if (error) setMessage(error.message);
     setSaAccounts((data as SAAccount[]) || []);
@@ -655,12 +656,19 @@ export default function AdminDashboard() {
             {isManagerAccount ? null : (
               <Pressable
                 style={styles.menuItem}
-                onPress={() => {
+                onPress={async () => {
                   setOpenMenuFor(null);
                   setShowSaListModal(false);
                   setShowManagerListModal(false);
                   setModalAccount(account);
+                  setModalPassword(null);
                   setShowPasswordModal(true);
+                  setModalPasswordLoading(true);
+                  const { data, error } = await supabase.rpc("get_sa_password", {
+                    p_email: account.email,
+                  });
+                  if (!error) setModalPassword(data ?? null);
+                  setModalPasswordLoading(false);
                 }}
               >
                 <Text style={styles.menuText}>View Password</Text>
@@ -1440,8 +1448,9 @@ export default function AdminDashboard() {
                   isSaCredsModal && styles.modalTextDark,
                 ]}
               >
-                {modalAccount?.password_plaintext ||
-                  "Not available — use Reset Password."}
+                {modalPasswordLoading
+                  ? "Loading…"
+                  : modalPassword || "Not available — use Reset Password."}
               </Text>
             </Text>
 
@@ -1466,7 +1475,7 @@ export default function AdminDashboard() {
                   const saId = isManagerAccount
                     ? modalAccount?.email ?? ""
                     : modalAccount?.email.split("@")[0] ?? "";
-                  const pw = modalAccount?.password_plaintext ?? "";
+                  const pw = modalPassword ?? "";
                   const textToCopy =
                     saId || pw ? `${idLabel}: ${saId}\nPassword: ${pw}` : "";
 
@@ -1524,6 +1533,7 @@ export default function AdminDashboard() {
                 onPress={() => {
                   setShowPasswordModal(false);
                   setModalAccount(null);
+                  setModalPassword(null);
                   setModalMessage(null);
                 }}
               >

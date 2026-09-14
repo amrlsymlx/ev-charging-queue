@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Keep the manager-visible plaintext copy in sync with the new password —
+    // Keep the manager-visible encrypted copy in sync with the new password —
     // but never for manager/admin accounts, so managers can't read each
     // other's passwords via the "View Password" action.
     const { data: targetRow } = await adminClient
@@ -155,10 +155,10 @@ Deno.serve(async (req) => {
     const isManagerAccount =
       targetRow?.role === "manager" || targetRow?.role === "admin";
 
-    await adminClient
-      .from("sa_users")
-      .update({ password_plaintext: isManagerAccount ? null : password })
-      .eq("email", email);
+    await adminClient.rpc("set_sa_password", {
+      p_email: email,
+      p_password: isManagerAccount ? null : password,
+    });
 
     await adminClient.from("activity_logs").insert([
       {

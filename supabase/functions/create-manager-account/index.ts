@@ -98,7 +98,6 @@ Deno.serve(async (req) => {
             name: name || email,
             email,
             role: "manager",
-            password_plaintext: null,
           },
         ],
         {

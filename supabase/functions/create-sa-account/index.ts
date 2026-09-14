@@ -93,7 +93,6 @@ Deno.serve(async (req) => {
             name: name || email,
             email,
             role: "sa",
-            password_plaintext: password,
           },
         ],
         {
@@ -103,6 +102,20 @@ Deno.serve(async (req) => {
 
     if (upsertError) {
       return new Response(JSON.stringify({ error: upsertError.message }), {
+        status: 400,
+        headers: corsHeaders,
+      });
+    }
+
+    // Stores the password encrypted (pgcrypto, key held in Supabase Vault) —
+    // only the set_sa_password/get_sa_password RPCs can write or read it.
+    const { error: passwordError } = await adminClient.rpc("set_sa_password", {
+      p_email: email,
+      p_password: password,
+    });
+
+    if (passwordError) {
+      return new Response(JSON.stringify({ error: passwordError.message }), {
         status: 400,
         headers: corsHeaders,
       });
