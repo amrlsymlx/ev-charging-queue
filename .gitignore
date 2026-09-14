@@ -5,6 +5,9 @@ web-build
 
 .env
 .env.local
+.env.development
+.env.production
+.env.example
 
 .DS_Store
 
@@ -21,3 +24,4 @@ coverage
 
 expo-env.d.ts
 # @end expo-cli
+
