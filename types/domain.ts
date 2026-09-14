@@ -72,6 +72,11 @@ export interface NewQueueEntryInput {
   gpsValidated: boolean;
   gpsOverrideRequested: boolean;
   agreedToTerms: boolean;
+  // The server independently recomputes gps_validated from these against
+  // the showroom's coordinates — see enforce_gps_validation() — so
+  // gpsValidated above only drives immediate client-side UI feedback.
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface NewStaffQueueEntryInput {

@@ -1,5 +1,6 @@
 import { logActivity } from "@/lib/activityLog";
 import { supabase } from "@/lib/supabase";
+import { useRequireRole } from "@/lib/useRequireRole";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -15,6 +16,10 @@ import {
 
 export default function TermsEditorScreen() {
   const router = useRouter();
+  const { checkingAuth, authorized } = useRequireRole(
+    ["manager", "admin"],
+    "/admin/login",
+  );
   const [terms, setTerms] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -68,6 +73,14 @@ export default function TermsEditorScreen() {
     setMessage("Terms & Conditions saved.");
     router.replace("/admin/dashboard");
   };
+
+  if (checkingAuth || !authorized) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <ActivityIndicator color="#D1DCF3" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -123,6 +136,7 @@ export default function TermsEditorScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#070D1A" },
+  centered: { justifyContent: "center", alignItems: "center" },
   content: { padding: 16 },
   card: {
     backgroundColor: "rgba(255,255,255,0.04)",

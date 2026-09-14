@@ -1,9 +1,11 @@
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Pressable,
   SafeAreaView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
@@ -12,34 +14,100 @@ import {
 function formatPlateNumber(input: string): string {
   if (!input) return "";
   const cleaned = input.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
-  const m = cleaned.match(/^([A-Z]*)(\d*)([A-Z]*)$/);
-  if (!m) return cleaned;
-  const [, leadingLetters, digits, trailingLetters] = m;
-  const parts: string[] = [];
-  if (leadingLetters) parts.push(leadingLetters);
-  if (digits) parts.push(digits);
-  if (trailingLetters) parts.push(trailingLetters);
-  return parts.join(" ");
+  if (!cleaned) return "";
+
+  // Space-separate every run of consecutive letters/digits, in whatever
+  // order they appear (e.g. "1122dndn22" -> "1122 DNDN 22"), not just the
+  // single leading/trailing-letter shape most plates use.
+  const parts = cleaned.match(/[A-Z]+|[0-9]+/g);
+  return parts ? parts.join(" ") : cleaned;
 }
 
 import PlateBadge from "@/components/PlateBadge";
 import { useQueue } from "@/context/QueueContext";
+import { Ionicons } from "@expo/vector-icons";
+import { deleteSecureItem, getSecureItem, setSecureItem } from "@/lib/secureStorage";
+
+const REMEMBER_KEY = "customer_track_lookup";
+
+const PHONE_PREFIXES = [
+  "+6011",
+  "+6012",
+  "+6013",
+  "+6014",
+  "+6016",
+  "+6017",
+  "+6018",
+  "+6019",
+  "+6010",
+];
 
 export default function CustomerTrackScreen() {
   const router = useRouter();
-  const { findLatestEntryByPlate } = useQueue();
+  const { findMyEntryByPlateAndPhone } = useQueue();
   const [lookupPlate, setLookupPlate] = useState("");
   const [formattedLookup, setFormattedLookup] = useState("");
+  const [phonePrefix, setPhonePrefix] = useState("+6017");
+  const [phoneLocal, setPhoneLocal] = useState("");
+  const [showPrefixPicker, setShowPrefixPicker] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
 
-  const handleLookup = () => {
-    const entry = findLatestEntryByPlate(
-      formattedLookup || formatPlateNumber(lookupPlate),
-    );
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await getSecureItem(REMEMBER_KEY);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          setLookupPlate(obj.plateNumber || "");
+          setFormattedLookup(formatPlateNumber(obj.plateNumber || ""));
+          setPhonePrefix(obj.phonePrefix || "+6017");
+          setPhoneLocal(obj.phoneLocal || "");
+          setRememberMe(true);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
+  const handleLookup = async () => {
+    if (!phoneLocal.trim()) {
+      setMessage("Enter the phone number used to join the queue.");
+      return;
+    }
+
+    setSearching(true);
+    setMessage(null);
+
+    const plateNumber = formattedLookup || formatPlateNumber(lookupPlate);
+    const fullPhone = `${phonePrefix}${phoneLocal}`;
+
+    const entry = await findMyEntryByPlateAndPhone(plateNumber, fullPhone);
+
+    setSearching(false);
 
     if (!entry) {
-      setMessage("No queue entry found for that plate number.");
+      // Deliberately generic — doesn't reveal whether the plate exists but
+      // the phone didn't match, vs. no entry at all for that plate.
+      setMessage(
+        "No queue entry found for that plate number and phone number.",
+      );
       return;
+    }
+
+    try {
+      if (rememberMe) {
+        await setSecureItem(
+          REMEMBER_KEY,
+          JSON.stringify({ plateNumber, phonePrefix, phoneLocal }),
+        );
+      } else {
+        await deleteSecureItem(REMEMBER_KEY);
+      }
+    } catch {
+      // ignore storage errors
     }
 
     router.push({
@@ -55,7 +123,8 @@ export default function CustomerTrackScreen() {
       <View style={styles.card}>
         <Text style={styles.title}>Track Queue</Text>
         <Text style={styles.subtitle}>
-          Enter your plate number to view current queue status.
+          Enter your plate number and the phone number you joined with to
+          view your queue status.
         </Text>
 
         <TextInput
@@ -72,8 +141,72 @@ export default function CustomerTrackScreen() {
 
         {formattedLookup ? <PlateBadge plateNumber={formattedLookup} /> : null}
 
-        <Pressable style={styles.button} onPress={handleLookup}>
-          <Text style={styles.buttonText}>Find My Queue</Text>
+        <View style={styles.phoneRow}>
+          <Pressable
+            onPress={() => setShowPrefixPicker((v) => !v)}
+            style={[
+              styles.prefixButton,
+              {
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+              },
+            ]}
+          >
+            <Ionicons
+              name="chevron-down"
+              size={14}
+              color="#F4F8FF"
+              style={{ marginRight: 6 }}
+            />
+            <Text style={{ color: "#F4F8FF" }}>{phonePrefix}</Text>
+          </Pressable>
+
+          <TextInput
+            style={[styles.input, { flex: 1 }]}
+            value={phoneLocal}
+            onChangeText={(t) => setPhoneLocal(t.replace(/[^0-9]/g, ""))}
+            placeholder="Phone Number (without prefix)"
+            placeholderTextColor="#7A8495"
+            keyboardType="phone-pad"
+            maxLength={12}
+          />
+
+          {showPrefixPicker ? (
+            <View style={styles.prefixMenu}>
+              {PHONE_PREFIXES.map((p) => (
+                <Pressable
+                  key={p}
+                  onPress={() => {
+                    setPhonePrefix(p);
+                    setShowPrefixPicker(false);
+                  }}
+                  style={styles.prefixItem}
+                >
+                  <Text style={{ color: "#D1DCF3" }}>{p}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.rememberRow}>
+          <Switch value={rememberMe} onValueChange={setRememberMe} />
+          <Text style={styles.rememberText}>Remember me</Text>
+        </View>
+
+        <Pressable
+          style={[styles.button, searching && styles.buttonDisabled]}
+          onPress={() => {
+            void handleLookup();
+          }}
+          disabled={searching}
+        >
+          {searching ? (
+            <ActivityIndicator color="#EAF2FF" />
+          ) : (
+            <Text style={styles.buttonText}>Find My Queue</Text>
+          )}
         </Pressable>
 
         {message ? <Text style={styles.message}>{message}</Text> : null}
@@ -131,6 +264,56 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     color: "#F4F8FF",
   },
+  phoneRow: {
+    flexDirection: "row",
+    gap: 8,
+    position: "relative",
+    alignItems: "center",
+    zIndex: 30,
+  },
+  prefixButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 0,
+    borderColor: "transparent",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  prefixMenu: {
+    position: "absolute",
+    zIndex: 99999,
+    top: 52,
+    left: 0,
+    minWidth: 96,
+    borderRadius: 8,
+    backgroundColor: "#111827",
+    borderWidth: 1,
+    borderColor: "#111827",
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 20,
+    opacity: 1,
+    paddingVertical: 0,
+  },
+  prefixItem: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: "#111827",
+    opacity: 1,
+  },
+  rememberRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  rememberText: {
+    color: "#D1DCF3",
+    marginLeft: 8,
+  },
   button: {
     backgroundColor: "rgba(132, 158, 255, 0.2)",
     borderWidth: 0,
@@ -138,6 +321,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 11,
     alignItems: "center",
+  },
+  buttonDisabled: {
+    opacity: 0.5,
   },
   buttonText: {
     color: "#EAF2FF",

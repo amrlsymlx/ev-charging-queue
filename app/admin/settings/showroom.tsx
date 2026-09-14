@@ -1,6 +1,7 @@
 import { logActivity } from "@/lib/activityLog";
 import { GeocodeResult, searchAddress } from "@/lib/geocode";
 import { supabase } from "@/lib/supabase";
+import { useRequireRole } from "@/lib/useRequireRole";
 import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -127,6 +128,10 @@ function WebMap({
 
 export default function ShowroomSettingsScreen() {
   const router = useRouter();
+  const { checkingAuth, authorized } = useRequireRole(
+    ["manager", "admin"],
+    "/admin/login",
+  );
   const [showroomName, setShowroomName] = useState("Main Showroom");
   const [lat, setLat] = useState("");
   const [lng, setLng] = useState("");
@@ -282,6 +287,14 @@ export default function ShowroomSettingsScreen() {
     setMessage("Showroom settings saved.");
     router.replace("/admin/dashboard");
   };
+
+  if (checkingAuth || !authorized) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <ActivityIndicator color="#D1DCF3" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -452,6 +465,7 @@ export default function ShowroomSettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#070D1A" },
+  centered: { justifyContent: "center", alignItems: "center" },
   content: { padding: 16 },
   card: {
     backgroundColor: "rgba(255,255,255,0.04)",

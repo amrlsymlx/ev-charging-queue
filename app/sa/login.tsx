@@ -64,7 +64,7 @@ export default function SALoginScreen() {
 
     if (saLookupError) {
       await supabase.auth.signOut();
-      setMessage(saLookupError.message);
+      setMessage("Login failed. Please try again.");
       setLoading(false);
       return;
     }

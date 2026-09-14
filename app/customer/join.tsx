@@ -18,7 +18,6 @@ import {
 } from "react-native";
 
 import BatteryIndicator from "../../components/BatteryIndicator";
-import LocationPickerCard from "../../components/LocationPickerCard";
 import PlateBadge from "../../components/PlateBadge";
 import { useQueue } from "../../context/QueueContext";
 import { showAlert } from "../../lib/alert";
@@ -61,19 +60,13 @@ function formatPlateNumber(input: string): string {
   if (!input) return "";
   // Remove non-alphanumeric and uppercase
   const cleaned = input.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  if (!cleaned) return "";
 
-  // Match leading letters, digits, trailing letters
-  const m = cleaned.match(/^([A-Z]*)(\d*)([A-Z]*)$/);
-  if (!m) return cleaned;
-
-  const [, leadingLetters, digits, trailingLetters] = m;
-
-  const parts: string[] = [];
-  if (leadingLetters) parts.push(leadingLetters);
-  if (digits) parts.push(digits);
-  if (trailingLetters) parts.push(trailingLetters);
-
-  return parts.join(" ");
+  // Space-separate every run of consecutive letters/digits, in whatever
+  // order they appear (e.g. "1122dndn22" -> "1122 DNDN 22"), not just the
+  // single leading/trailing-letter shape most plates use.
+  const parts = cleaned.match(/[A-Z]+|[0-9]+/g);
+  return parts ? parts.join(" ") : cleaned;
 }
 
 function toSafeBatteryValue(value: unknown): number {
@@ -97,9 +90,7 @@ export default function CustomerJoinScreen() {
   const [batteryPercentage, setBatteryPercentage] = useState<number>(50);
   const [currentLatitude, setCurrentLatitude] = useState("");
   const [currentLongitude, setCurrentLongitude] = useState("");
-  const [gpsTestEnabled, setGpsTestEnabled] = useState(true);
 
-  const [showroomName, setShowroomName] = useState("Showroom");
   const [showroomLatitude, setShowroomLatitude] = useState<number | null>(null);
   const [showroomLongitude, setShowroomLongitude] = useState<number | null>(
     null,
@@ -144,18 +135,19 @@ export default function CustomerJoinScreen() {
 
       if (error) {
         if (error.code !== "PGRST116") {
-          setMessage(error.message);
+          // Generic message for customers — the raw Postgres/PostgREST error
+          // can include internal schema/constraint details that shouldn't be
+          // shown to an anonymous, untrusted visitor.
+          setMessage("Unable to load showroom settings. Please try again shortly.");
         }
         setLoadingSettings(false);
         return;
       }
 
       if (data) {
-        setShowroomName(data.showroom_name || "Showroom");
         setShowroomLatitude(data.latitude ?? null);
         setShowroomLongitude(data.longitude ?? null);
         setGpsLimitMeters(data.gps_radius_m ?? 50);
-        setGpsTestEnabled(data.gps_test_enabled ?? true);
         setTermsText(data.terms_and_conditions || "");
       }
 
@@ -198,13 +190,12 @@ export default function CustomerJoinScreen() {
   };
 
   // Auto-request the device's real GPS location once showroom settings have
-  // loaded, unless the manual GPS test picker is enabled (used for testing
-  // on devices/browsers where a real fix isn't practical).
+  // loaded.
   useEffect(() => {
-    if (loadingSettings || gpsTestEnabled) return;
+    if (loadingSettings) return;
     void handleRetryLocation();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingSettings, gpsTestEnabled]);
+  }, [loadingSettings]);
 
   // Ticks every second so the live estimate below stays in sync with the
   // actual bay countdowns it's derived from.
@@ -358,7 +349,7 @@ export default function CustomerJoinScreen() {
     );
 
     if (blockedCheckError) {
-      setMessage(blockedCheckError.message);
+      setMessage("Unable to verify your plate number. Please try again.");
       return;
     }
 
@@ -387,7 +378,7 @@ export default function CustomerJoinScreen() {
     );
 
     if (queuedTodayError) {
-      setMessage(queuedTodayError.message);
+      setMessage("Unable to verify queue eligibility. Please try again.");
       return;
     }
 
@@ -432,9 +423,14 @@ export default function CustomerJoinScreen() {
         gpsValidated,
         gpsOverrideRequested: !gpsValidated,
         agreedToTerms: agreed,
+        latitude: Number.isNaN(parsedCurrentLat) ? undefined : parsedCurrentLat,
+        longitude: Number.isNaN(parsedCurrentLng) ? undefined : parsedCurrentLng,
       });
 
-      if (gpsValidated) {
+      // The server independently recomputes gps_validated from the
+      // submitted coordinates, so the returned entry — not the local
+      // pre-submit guess — is the actual outcome to report.
+      if (entry.gpsValidated) {
         setMessage("Queue join success, track your queue now.");
       } else {
         setMessage(
@@ -447,15 +443,27 @@ export default function CustomerJoinScreen() {
         params: { id: entry.id },
       });
     } catch (err: any) {
-      const rawMessage = err?.message || "Failed to join queue. Please try again.";
+      const rawMessage = err?.message || "";
       if (rawMessage.includes("PLATE_BLOCKED")) {
         const blockedPlate = formattedPlate || formatPlateNumber(plateNumber);
         showAlert(
           "Plate blocked",
           `${blockedPlate}\n\nThis plate number is blocked from using our charger due violation of our T&C.`,
         );
+      } else if (rawMessage.includes("PLATE_ALREADY_QUEUED_TODAY")) {
+        showAlert(
+          "Already queued today",
+          "This plate number has already joined the charging queue today. Please try again tomorrow.",
+        );
+      } else if (rawMessage.includes("REGISTRATION_CLOSED")) {
+        setMessage(
+          "Queue registration is currently closed. Please check the showroom's operating hours.",
+        );
       } else {
-        setMessage(rawMessage);
+        // Generic message for customers — the raw Postgres/PostgREST error
+        // (RLS denial, CHECK constraint text, etc.) can reveal internal
+        // schema details that shouldn't be shown to an anonymous visitor.
+        setMessage("Failed to join queue. Please try again.");
       }
     } finally {
       setSubmitting(false);
@@ -479,7 +487,7 @@ export default function CustomerJoinScreen() {
           <Text style={[styles.sectionTitle, styles.sectionTitleCentered]}>
             Queue Register
           </Text>
-          {!scheduleEval || scheduleEval.isWithinOperatingHours ? (
+          {!scheduleEval || scheduleEval.canRegister ? (
             <Text style={[styles.etaBadge, styles.caption]}>
               Estimated wait: {estimatedWait}
               {estimatedStart && estimatedStart !== "--"
@@ -541,7 +549,7 @@ export default function CustomerJoinScreen() {
               Error. Ask SA on duty to approve.
             </Text>
           )}
-          {gpsStatus !== "valid" && !gpsTestEnabled ? (
+          {gpsStatus !== "valid" ? (
             <Pressable
               style={[styles.retryButton, locatingDevice && styles.disabledButton]}
               onPress={() => {
@@ -730,25 +738,6 @@ export default function CustomerJoinScreen() {
           <View style={styles.sectionCard}>
             <ActivityIndicator color="#D1DCF3" />
           </View>
-        ) : gpsTestEnabled ? (
-          <LocationPickerCard
-            latitude={currentLatitude}
-            longitude={currentLongitude}
-            onChangeCoordinates={(latitude, longitude) => {
-              setCurrentLatitude(latitude);
-              setCurrentLongitude(longitude);
-            }}
-            enabled={gpsTestEnabled}
-            onToggleEnabled={setGpsTestEnabled}
-            referenceLatitude={showroomLatitude ?? 3.139}
-            referenceLongitude={showroomLongitude ?? 101.6869}
-            radiusMeters={gpsLimitMeters}
-            helperText={`Showroom: ${showroomName} | Radius limit: ${gpsLimitMeters}m${
-              distanceMeters === null
-                ? ""
-                : ` | Distance: ${Math.round(distanceMeters)}m`
-            }`}
-          />
         ) : null}
       </ScrollView>
 

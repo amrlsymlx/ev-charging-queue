@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+    ActivityIndicator,
     Pressable,
     SafeAreaView,
     ScrollView,
@@ -16,11 +17,54 @@ import { Ionicons } from "@expo/vector-icons";
 
 export default function SADashboardScreen() {
   const router = useRouter();
-  const { saName = "SA" } = useLocalSearchParams<{
+  const { saName: routeSaName } = useLocalSearchParams<{
     saName?: string;
     role?: string;
   }>();
   const [tab, setTab] = useState<"queue" | "board">("queue");
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const [saName, setSaName] = useState(routeSaName || "SA");
+
+  // The saName/role route params are only ever used for the initial greeting
+  // text — they're not trusted for access control. supabase.auth.getUser()
+  // round-trips to Supabase Auth to confirm a real signed-in session with an
+  // sa/manager/admin role exists before this screen does anything, since a
+  // route param can be set by simply navigating to this URL directly.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.auth.getUser();
+      const user = data?.user;
+      const role = user?.app_metadata?.role || user?.user_metadata?.role;
+      const ok = !error && !!user && ["sa", "manager", "admin"].includes(role);
+
+      if (cancelled) return;
+
+      if (!ok) {
+        router.replace("/sa/login");
+        return;
+      }
+
+      setSaName(
+        routeSaName || user?.user_metadata?.name || user?.email?.split("@")[0] || "SA",
+      );
+      setAuthorized(true);
+      setCheckingAuth(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (checkingAuth || !authorized) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <ActivityIndicator color="#D1DCF3" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -89,6 +133,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#070D1A",
+  },
+  centered: {
+    justifyContent: "center",
+    alignItems: "center",
   },
   headerRow: {
     flexDirection: "row",

@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
     Animated,
     Pressable,
@@ -20,6 +20,13 @@ import {
     getSessionProgress,
     getWaitProgress,
 } from "@/lib/eta";
+import {
+    evaluateSchedule,
+    fetchOperatingHours,
+    fetchUpcomingHolidays,
+    OperatingHoursRow,
+    PublicHoliday,
+} from "@/lib/operatingHours";
 
 export default function CustomerStatusScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -41,6 +48,31 @@ export default function CustomerStatusScreen() {
     const interval = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  const [hoursRows, setHoursRows] = useState<OperatingHoursRow[]>([]);
+  const [holidays, setHolidays] = useState<PublicHoliday[]>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [rows, holidayRows] = await Promise.all([
+          fetchOperatingHours(),
+          fetchUpcomingHolidays(),
+        ]);
+        setHoursRows(rows);
+        setHolidays(holidayRows);
+      } catch {
+        // Best-effort: if operating hours aren't configured, don't block the
+        // status screen over it.
+      }
+    })();
+  }, []);
+
+  const scheduleEval = useMemo(() => {
+    if (hoursRows.length === 0) return null;
+    return evaluateSchedule(hoursRows, holidays);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoursRows, holidays]);
+  const canShowEta = !scheduleEval || scheduleEval.canRegister;
 
   const blink = useRef(new Animated.Value(1));
   useEffect(() => {
@@ -105,7 +137,9 @@ export default function CustomerStatusScreen() {
       <View style={styles.bgGlowTwo} />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.heroCard}>
-          <Text style={styles.heroTitle}>Hello, {entry.name}</Text>
+          <Text style={styles.heroTitle}>
+            {entry.name ? `Hello, ${entry.name}` : "Queue Status"}
+          </Text>
           <PlateBadge plateNumber={entry.plateNumber} />
           <Text style={styles.heroStatus}>
             Status:{" "}
@@ -132,37 +166,43 @@ export default function CustomerStatusScreen() {
                 Current Position
               </Text>
               <Text style={styles.metricValue}>#{queuePosition}</Text>
-              <Text style={[styles.metricLabel, styles.centeredText]}>
-                ETA Start Charging
-              </Text>
-              <Text style={styles.metricValue}>
-                {rainMode ? "∞" : formatCountdown(etaSeconds)}
-              </Text>
-              <Text style={[styles.metricLabel, styles.centeredText]}>
-                ETA Start Time
-              </Text>
-              <Text style={styles.metricValue}>
-                {rainMode
-                  ? "∞"
-                  : formatClockTime(new Date(Date.now() + etaSeconds * 1000))}
-              </Text>
-              <View style={styles.progressTrack}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    styles.progressFillEta,
-                    {
-                      width: `${Math.min(
-                        Math.max(
-                          getWaitProgress(entry.joinedAt, etaSeconds) * 100,
-                          0,
-                        ),
-                        100,
-                      )}%`,
-                    },
-                  ]}
-                />
-              </View>
+              {canShowEta ? (
+                <>
+                  <Text style={[styles.metricLabel, styles.centeredText]}>
+                    ETA Start Charging
+                  </Text>
+                  <Text style={styles.metricValue}>
+                    {rainMode ? "∞" : formatCountdown(etaSeconds)}
+                  </Text>
+                  <Text style={[styles.metricLabel, styles.centeredText]}>
+                    ETA Start Time
+                  </Text>
+                  <Text style={styles.metricValue}>
+                    {rainMode
+                      ? "∞"
+                      : formatClockTime(
+                          new Date(Date.now() + etaSeconds * 1000),
+                        )}
+                  </Text>
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        styles.progressFillEta,
+                        {
+                          width: `${Math.min(
+                            Math.max(
+                              getWaitProgress(entry.joinedAt, etaSeconds) * 100,
+                              0,
+                            ),
+                            100,
+                          )}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                </>
+              ) : null}
             </>
           ) : null}
 
@@ -347,9 +387,11 @@ export default function CustomerStatusScreen() {
                 <Text style={styles.queueText}>#{index + 1}</Text>
                 <PlateBadge plateNumber={item.plateNumber} />
               </View>
-              <Text style={styles.queueEta}>
-                {formatCountdown(getEtaForEntry(item.id))}
-              </Text>
+              {canShowEta ? (
+                <Text style={styles.queueEta}>
+                  {formatCountdown(getEtaForEntry(item.id))}
+                </Text>
+              ) : null}
             </View>
           ))}
         </View>

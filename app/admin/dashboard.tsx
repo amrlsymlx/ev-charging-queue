@@ -19,7 +19,6 @@ import {
     SafeAreaView,
     ScrollView,
     StyleSheet,
-    Switch,
     Text,
     View,
 } from "react-native";
@@ -116,7 +115,6 @@ export default function AdminDashboard() {
   const [gpsRadiusM, setGpsRadiusM] = useState("50");
   const [graceMinutes, setGraceMinutes] = useState("5");
   const [chargingMinutes, setChargingMinutes] = useState("60");
-  const [gpsTestEnabled, setGpsTestEnabled] = useState(false);
   const [loadingShowroom, setLoadingShowroom] = useState(false);
   const [statsResetAt, setStatsResetAt] = useState<string | null>(null);
   const [resettingStats, setResettingStats] = useState(false);
@@ -191,7 +189,6 @@ export default function AdminDashboard() {
       setGpsRadiusM(String(data.gps_radius_m ?? 50));
       setGraceMinutes(String(data.grace_minutes ?? 5));
       setChargingMinutes(String(data.charging_minutes ?? 60));
-      setGpsTestEnabled(data.gps_test_enabled ?? true);
       setStatsResetAt(data.stats_reset_at ?? null);
     }
     setLoadingShowroom(false);
@@ -1326,7 +1323,7 @@ export default function AdminDashboard() {
                 </Pressable>
               </View>
 
-              <View style={styles.settingsRow}>
+              <View style={[styles.settingsRow, styles.settingsRowLast]}>
                 <View style={styles.settingsRowLeft}>
                   <Text style={styles.settingsRowTitle}>
                     Showroom Settings
@@ -1344,44 +1341,6 @@ export default function AdminDashboard() {
                 >
                   <Text style={styles.settingsRowButtonText}>Edit</Text>
                 </Pressable>
-              </View>
-
-              <View style={[styles.settingsRow, styles.settingsRowLast]}>
-                <View style={styles.settingsRowLeft}>
-                  <Text style={styles.settingsRowTitle}>
-                    Customer GPS Test (Developer Mode)
-                  </Text>
-                  <Text style={styles.settingsRowSubtitle}>
-                    {gpsTestEnabled ? "Enabled" : "Disabled"}
-                  </Text>
-                </View>
-                <Switch
-                  value={gpsTestEnabled}
-                  onValueChange={async (v) => {
-                    if (checkingAuth || !isManagerSession) {
-                      setMessage("Not authorized to change this setting.");
-                      return;
-                    }
-                    const previous = gpsTestEnabled;
-                    setGpsTestEnabled(v);
-                    const { error } = await supabase
-                      .from("showroom_settings")
-                      .update({ gps_test_enabled: v })
-                      .eq("id", "main");
-                    if (error) {
-                      setGpsTestEnabled(previous);
-                      setMessage(error.message);
-                    } else {
-                      void logActivity({
-                        action: "showroom_settings.toggle_gps_test",
-                        targetType: "showroom_settings",
-                        targetId: "main",
-                        details: { enabled: v },
-                      });
-                    }
-                  }}
-                  disabled={checkingAuth || !isManagerSession}
-                />
               </View>
             </View>
           </>

@@ -1,5 +1,6 @@
 import { useQueue } from "@/context/QueueContext";
 import { promptForInput, showAlert } from "@/lib/alert";
+import { useRequireRole } from "@/lib/useRequireRole";
 import { ChargingBay } from "@/types/domain";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -21,6 +22,10 @@ const DISABLE_REASONS = ["Maintenance", "Faulty", "Priority", "Other"];
 
 export default function BaysScreen() {
   const router = useRouter();
+  const { checkingAuth, authorized } = useRequireRole(
+    ["manager", "admin"],
+    "/admin/login",
+  );
   const { bays, addBay, renameBay, deleteBay, setBayEnabled } = useQueue();
 
   const [bayName, setBayName] = useState("");
@@ -145,6 +150,14 @@ export default function BaysScreen() {
       ],
     );
   };
+
+  if (checkingAuth || !authorized) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <ActivityIndicator color="#D1DCF3" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -341,6 +354,7 @@ export default function BaysScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#070D1A" },
+  centered: { justifyContent: "center", alignItems: "center" },
   content: { padding: 16, gap: 12 },
   card: {
     backgroundColor: "rgba(255,255,255,0.04)",

@@ -38,7 +38,10 @@ interface QueueContextValue {
   addQueueEntry: (input: NewQueueEntryInput) => Promise<QueueEntry>;
   addStaffQueueEntry: (input: NewStaffQueueEntryInput) => Promise<QueueEntry>;
   getQueueEntryById: (entryId: string) => QueueEntry | undefined;
-  findLatestEntryByPlate: (plateNumber: string) => QueueEntry | undefined;
+  findMyEntryByPlateAndPhone: (
+    plateNumber: string,
+    phoneNumber: string,
+  ) => Promise<QueueEntry | undefined>;
   getQueuePosition: (entryId: string) => number | null;
   getEtaForEntry: (entryId: string) => number;
   getEtaForPosition: (position: number) => number;
@@ -69,10 +72,12 @@ const CHARGING_MINUTES = 60;
 
 const INITIAL_SA_USERS: SAUser[] = [];
 
-// Columns the anon (customer) role is granted; phone_number is deliberately
-// excluded at the database column-privilege level, so this list must match.
+// Columns the anon (customer) role is granted; name and phone_number are
+// deliberately excluded at the database column-privilege level (customers
+// can otherwise see each other's real name/phone by browsing the shared
+// queue list), so this list must match.
 const ANON_QUEUE_COLUMNS =
-  "id, name, plate_number, battery_percentage, joined_at, status, gps_validated, gps_override_requested, gps_override_approved, agreed_to_terms, bay_id, created_at, updated_at";
+  "id, plate_number, battery_percentage, joined_at, status, gps_validated, gps_override_requested, gps_override_approved, agreed_to_terms, bay_id, created_at, updated_at";
 
 function mapBay(row: any): ChargingBay {
   return {
@@ -89,7 +94,9 @@ function mapBay(row: any): ChargingBay {
 function mapQueueEntry(row: any): QueueEntry {
   return {
     id: row.id,
-    name: row.name,
+    // Not present for entries anon can't prove ownership of — see
+    // ANON_QUEUE_COLUMNS and myEntries below.
+    name: row.name ?? "",
     phoneNumber: row.phone_number ?? "",
     plateNumber: row.plate_number,
     batteryPercentage: row.battery_percentage,
@@ -134,6 +141,11 @@ export function QueueProvider({ children }: PropsWithChildren) {
   const [chargingMinutes, setChargingMinutes] = useState(CHARGING_MINUTES);
   const [rainMode, setRainModeState] = useState(false);
   const [showroomName, setShowroomName] = useState("Main Showroom");
+  // Full details (name/phone included) for entries this device has proven
+  // ownership of — either by just creating them, or via
+  // findMyEntryByPlateAndPhone. Never populated from the general anon-level
+  // queue list, which no longer carries name/phone at all.
+  const [myEntries, setMyEntries] = useState<Record<string, QueueEntry>>({});
 
   const isStaffRef = useRef(isStaff);
   isStaffRef.current = isStaff;
@@ -376,6 +388,12 @@ export function QueueProvider({ children }: PropsWithChildren) {
           gps_override_requested: input.gpsOverrideRequested,
           gps_override_approved: false,
           agreed_to_terms: input.agreedToTerms,
+          // The server recomputes gps_validated/gps_override_requested from
+          // these against the showroom's coordinates (enforce_gps_validation
+          // trigger) — the gps_validated above is only a client-side guess
+          // for instant UI feedback before this call resolves.
+          submitted_latitude: input.latitude ?? null,
+          submitted_longitude: input.longitude ?? null,
         },
       ])
       .select(ANON_QUEUE_COLUMNS)
@@ -385,8 +403,17 @@ export function QueueProvider({ children }: PropsWithChildren) {
       throw new Error(error?.message || "Failed to join queue.");
     }
 
-    const entry = mapQueueEntry(data);
+    // The server no longer returns name/phone to anon at all — merge back
+    // the values the customer just typed (which this device already has)
+    // rather than re-fetching them, and cache the full entry locally so
+    // this device can keep showing its own name on the status screen.
+    const entry: QueueEntry = {
+      ...mapQueueEntry(data),
+      name: input.name,
+      phoneNumber: input.phoneNumber,
+    };
     setQueueEntries((prev) => [...prev, entry]);
+    setMyEntries((prev) => ({ ...prev, [entry.id]: entry }));
 
     void logActivity({
       action: "queue.join",
@@ -453,16 +480,32 @@ export function QueueProvider({ children }: PropsWithChildren) {
     return entry;
   };
 
+  // myEntries (proven-ownership, full detail) takes priority over the
+  // shared anon-level list, which never carries name/phone.
   const getQueueEntryById = (entryId: string) =>
-    queueEntries.find((entry) => entry.id === entryId);
+    myEntries[entryId] ?? queueEntries.find((entry) => entry.id === entryId);
 
-  const findLatestEntryByPlate = (plateNumber: string) => {
-    const needle = plateNumber.trim().toUpperCase();
-    const sortedMatches = queueEntries
-      .filter((entry) => entry.plateNumber === needle)
-      .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  // Requires both the plate AND the phone number on file for it — a
+  // stranger who only saw the car's plate can't satisfy this, since
+  // find_my_queue_entry (SECURITY DEFINER) only returns a row when both
+  // match. See supabase/hide_customer_name_from_anon... for the RPC.
+  const findMyEntryByPlateAndPhone = async (
+    plateNumber: string,
+    phoneNumber: string,
+  ): Promise<QueueEntry | undefined> => {
+    const { data, error } = await supabase.rpc("find_my_queue_entry", {
+      p_plate: plateNumber,
+      p_phone: phoneNumber,
+    });
 
-    return sortedMatches[0];
+    if (error || !data || (Array.isArray(data) && data.length === 0)) {
+      return undefined;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    const entry = mapQueueEntry(row);
+    setMyEntries((prev) => ({ ...prev, [entry.id]: entry }));
+    return entry;
   };
 
   const getQueuePosition = (entryId: string) => {
@@ -901,7 +944,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
     addQueueEntry,
     addStaffQueueEntry,
     getQueueEntryById,
-    findLatestEntryByPlate,
+    findMyEntryByPlateAndPhone,
     getQueuePosition,
     getEtaForEntry,
     getEtaForPosition,

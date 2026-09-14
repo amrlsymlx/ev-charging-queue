@@ -144,7 +144,7 @@ export default function PublicBoardPanel({
     <>
       {embedded ? null : <Text style={styles.heading}>Live Queue Board</Text>}
 
-      {isShowroomOpen ? (
+      {canRegister ? (
         <Text style={[styles.subheading, styles.etaBadge]}>
           Estimated wait: {estimatedWait}
           {estimatedStart !== "--"
@@ -323,22 +323,26 @@ export default function PublicBoardPanel({
                 <PlateBadge plateNumber={item.plateNumber} />
               </View>
               <View style={styles.queueRowRight}>
-                <Text style={styles.queueEta}>
-                  {rainMode ? "∞" : formatCountdown(etaSeconds)}
-                </Text>
-                {rainMode ? null : (
-                  <View style={styles.miniProgressTrack}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        styles.progressFillEta,
-                        {
-                          width: `${Math.min(Math.max(progress * 100, 0), 100)}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-                )}
+                {canRegister ? (
+                  <>
+                    <Text style={styles.queueEta}>
+                      {rainMode ? "∞" : formatCountdown(etaSeconds)}
+                    </Text>
+                    {rainMode ? null : (
+                      <View style={styles.miniProgressTrack}>
+                        <View
+                          style={[
+                            styles.progressFill,
+                            styles.progressFillEta,
+                            {
+                              width: `${Math.min(Math.max(progress * 100, 0), 100)}%`,
+                            },
+                          ]}
+                        />
+                      </View>
+                    )}
+                  </>
+                ) : null}
               </View>
             </View>
           );

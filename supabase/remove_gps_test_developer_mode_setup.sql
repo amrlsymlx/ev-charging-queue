@@ -1,0 +1,13 @@
+-- Removes the "Customer GPS Test (Developer Mode)" feature added by
+-- add_gps_test_enabled.sql. Applied directly to the project as migration
+-- `remove_gps_test_developer_mode`; kept here so the repo's supabase/
+-- scripts stay a complete record of live schema changes.
+--
+-- This was a manager-toggleable setting that let the customer join screen
+-- (app/customer/join.tsx) accept a manually-entered lat/lng via
+-- components/LocationPickerCard instead of the device's real GPS — useful
+-- for testing, but a way to fake proximity to the showroom in production.
+-- The toggle (admin/dashboard.tsx), the picker component, and this column
+-- have all been removed; the join screen now always uses the device's real
+-- GPS fix.
+alter table public.showroom_settings drop column if exists gps_test_enabled;

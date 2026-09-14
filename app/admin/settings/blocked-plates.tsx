@@ -1,6 +1,7 @@
 import { logActivity } from "@/lib/activityLog";
 import { showAlert } from "@/lib/alert";
 import { supabase } from "@/lib/supabase";
+import { useRequireRole } from "@/lib/useRequireRole";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
@@ -28,6 +29,10 @@ function normalizePlate(input: string): string {
 
 export default function BlockedPlatesScreen() {
   const router = useRouter();
+  const { checkingAuth, authorized } = useRequireRole(
+    ["manager", "admin"],
+    "/admin/login",
+  );
   const [plates, setPlates] = useState<BlockedPlate[]>([]);
   const [loading, setLoading] = useState(true);
   const [plateInput, setPlateInput] = useState("");
@@ -125,6 +130,14 @@ export default function BlockedPlatesScreen() {
     );
   };
 
+  if (checkingAuth || !authorized) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <ActivityIndicator color="#D1DCF3" />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -218,6 +231,7 @@ export default function BlockedPlatesScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#070D1A" },
+  centered: { justifyContent: "center", alignItems: "center" },
   content: { padding: 16, gap: 12 },
   card: {
     backgroundColor: "rgba(255,255,255,0.04)",

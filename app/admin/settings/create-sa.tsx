@@ -1,5 +1,6 @@
 import { showAlert } from "@/lib/alert";
 import { SUPABASE_URL, supabase } from "@/lib/supabase";
+import { useRequireRole } from "@/lib/useRequireRole";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -13,15 +14,50 @@ import {
     View,
 } from "react-native";
 
+const ID_RULES = [
+  {
+    key: "length",
+    label: "At least 5 characters",
+    test: (value: string) => value.trim().length >= 5,
+  },
+  {
+    key: "alphanumeric",
+    label: "Letters and numbers only",
+    test: (value: string) => /^[A-Za-z0-9]+$/.test(value.trim()),
+  },
+];
+
+const PASSWORD_RULES = [
+  {
+    key: "length",
+    label: "At least 8 characters",
+    test: (value: string) => value.length >= 8,
+  },
+];
+
 export default function CreateSaScreen() {
   const router = useRouter();
+  const { checkingAuth, authorized } = useRequireRole(
+    ["manager", "admin"],
+    "/admin/login",
+  );
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  const idHasUppercase = /[A-Z]/.test(id);
+  const idRuleResults = ID_RULES.map((rule) => ({
+    ...rule,
+    met: rule.test(id),
+  }));
+  const idValid = idRuleResults.every((rule) => rule.met);
+
+  const passwordRuleResults = PASSWORD_RULES.map((rule) => ({
+    ...rule,
+    met: rule.test(password),
+  }));
+  const passwordValid = passwordRuleResults.every((rule) => rule.met);
 
   const buildFunctionUrl = (fnName: string) => {
     try {
@@ -40,8 +76,13 @@ export default function CreateSaScreen() {
       return;
     }
 
-    if (idHasUppercase) {
-      setMessage("Letters must be lowercase.");
+    if (!idValid) {
+      setMessage("SA name does not meet all requirements.");
+      return;
+    }
+
+    if (!passwordValid) {
+      setMessage("Password must be at least 8 characters.");
       return;
     }
 
@@ -120,6 +161,16 @@ export default function CreateSaScreen() {
     }
   };
 
+  if (checkingAuth || !authorized) {
+    return (
+      <Modal visible transparent animationType="fade">
+        <View style={styles.overlay}>
+          <ActivityIndicator color="#D1DCF3" />
+        </View>
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       visible
@@ -140,8 +191,21 @@ export default function CreateSaScreen() {
             placeholderTextColor="#7E8EA8"
             autoCapitalize="none"
           />
-          {idHasUppercase ? (
-            <Text style={styles.errorText}>Letters must be lowercase.</Text>
+          {id.length > 0 ? (
+            <View style={styles.ruleList}>
+              {idRuleResults.map((rule) => (
+                <View key={rule.key} style={styles.ruleRow}>
+                  <Ionicons
+                    name={rule.met ? "checkmark-circle" : "close-circle"}
+                    size={16}
+                    color={rule.met ? "#7FE0A8" : "#FF9B9B"}
+                  />
+                  <Text style={[styles.ruleText, rule.met && styles.ruleTextMet]}>
+                    {rule.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
           ) : null}
 
           <View style={styles.inputRow}>
@@ -165,15 +229,30 @@ export default function CreateSaScreen() {
               />
             </Pressable>
           </View>
+          {password.length > 0 ? (
+            <View style={styles.ruleList}>
+              {passwordRuleResults.map((rule) => (
+                <View key={rule.key} style={styles.ruleRow}>
+                  <Ionicons
+                    name={rule.met ? "checkmark-circle" : "close-circle"}
+                    size={16}
+                    color={rule.met ? "#7FE0A8" : "#FF9B9B"}
+                  />
+                  <Text style={[styles.ruleText, rule.met && styles.ruleTextMet]}>
+                    {rule.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
 
           <Pressable
             style={[
               styles.button,
-              (saving || idHasUppercase || !id.trim() || !password) &&
-                styles.buttonDisabled,
+              (saving || !idValid || !passwordValid) && styles.buttonDisabled,
             ]}
             onPress={onCreate}
-            disabled={saving || idHasUppercase || !id.trim() || !password}
+            disabled={saving || !idValid || !passwordValid}
           >
             {saving ? (
               <ActivityIndicator color="#FFF" />
@@ -237,11 +316,23 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.04)",
   },
   eyeButton: { padding: 10 },
-  errorText: {
-    color: "#FF9B8A",
+  ruleList: {
     marginTop: -4,
     marginBottom: 8,
-    fontSize: 12,
+    paddingHorizontal: 4,
+  },
+  ruleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  ruleText: {
+    color: "#D1DCF3",
+    marginLeft: 6,
+    fontSize: 13,
+  },
+  ruleTextMet: {
+    color: "#7FE0A8",
   },
   button: {
     backgroundColor: "rgba(132, 158, 255, 0.2)",

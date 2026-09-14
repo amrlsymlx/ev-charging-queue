@@ -1,7 +1,10 @@
 import Head from "expo-router/head";
-import { Stack } from "expo-router";
+import { Stack, usePathname, useRouter } from "expo-router";
+import { useEffect } from "react";
 
 import { QueueProvider, useQueue } from "@/context/QueueContext";
+import { getSecureItem, setSecureItem } from "@/lib/secureStorage";
+import { supabase } from "@/lib/supabase";
 
 function DocumentTitle() {
   const { showroomName } = useQueue();
@@ -12,10 +15,60 @@ function DocumentTitle() {
   );
 }
 
+// Device-level (not true per-IP — this is a static site with no server to
+// inspect request IPs) tracking: once a device has opened a customer-facing
+// route, it can no longer land on the landing page ("/", with its SA/Manager
+// login links) — even by editing the address bar back to it — unless it
+// currently holds a valid staff session. This never blocks any route other
+// than "/" itself.
+const CUSTOMER_DEVICE_KEY = "customer_device_marked";
+
+function CustomerDeviceGate() {
+  const pathname = usePathname();
+  const router = useRouter();
+
+  useEffect(() => {
+    (async () => {
+      const isCustomerRoute =
+        pathname.startsWith("/customer") || pathname.startsWith("/public");
+
+      if (isCustomerRoute) {
+        try {
+          await setSecureItem(CUSTOMER_DEVICE_KEY, "1");
+        } catch {
+          // ignore storage errors
+        }
+        return;
+      }
+
+      if (pathname !== "/") return;
+
+      let marked = false;
+      try {
+        marked = (await getSecureItem(CUSTOMER_DEVICE_KEY)) === "1";
+      } catch {
+        marked = false;
+      }
+      if (!marked) return;
+
+      const { data } = await supabase.auth.getUser();
+      const user = data?.user;
+      const role = user?.app_metadata?.role || user?.user_metadata?.role;
+      const isStaff = role === "sa" || role === "manager" || role === "admin";
+      if (isStaff) return;
+
+      router.replace("/customer");
+    })();
+  }, [pathname, router]);
+
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <QueueProvider>
       <DocumentTitle />
+      <CustomerDeviceGate />
       <Stack
         screenOptions={{
           headerShown: false,

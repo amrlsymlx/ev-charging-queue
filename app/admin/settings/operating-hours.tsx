@@ -4,6 +4,7 @@ import { logActivity } from "@/lib/activityLog";
 import { showAlert } from "@/lib/alert";
 import { DAY_LABELS, DISPLAY_DAY_ORDER, formatHHMM } from "@/lib/operatingHours";
 import { supabase } from "@/lib/supabase";
+import { useRequireRole } from "@/lib/useRequireRole";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
@@ -44,6 +45,10 @@ function defaultDayForm(dayOfWeek: number): DayForm {
 
 export default function OperatingHoursScreen() {
   const router = useRouter();
+  const { checkingAuth, authorized } = useRequireRole(
+    ["manager", "admin"],
+    "/admin/login",
+  );
   const [days, setDays] = useState<DayForm[]>(
     DISPLAY_DAY_ORDER.map(defaultDayForm),
   );
@@ -220,6 +225,14 @@ export default function OperatingHoursScreen() {
     );
   };
 
+  if (checkingAuth || !authorized) {
+    return (
+      <SafeAreaView style={[styles.container, styles.centered]}>
+        <ActivityIndicator color="#D1DCF3" />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -375,6 +388,7 @@ export default function OperatingHoursScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#070D1A" },
+  centered: { justifyContent: "center", alignItems: "center" },
   content: { padding: 16, gap: 12 },
   card: {
     backgroundColor: "rgba(255,255,255,0.04)",

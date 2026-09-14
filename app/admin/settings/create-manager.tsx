@@ -1,5 +1,7 @@
 import { showAlert } from "@/lib/alert";
 import { SITE_URL, SUPABASE_URL, supabase } from "@/lib/supabase";
+import { useRequireRole } from "@/lib/useRequireRole";
+import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
@@ -12,12 +14,51 @@ import {
     View,
 } from "react-native";
 
+const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const NAME_RULES = [
+  {
+    key: "length",
+    label: "At least 5 characters",
+    test: (value: string) => value.trim().length >= 5,
+  },
+  {
+    key: "alphanumeric",
+    label: "Letters and numbers only",
+    test: (value: string) => /^[A-Za-z0-9]+$/.test(value.trim()),
+  },
+];
+
+const EMAIL_RULES = [
+  {
+    key: "format",
+    label: "Valid email address",
+    test: (value: string) => EMAIL_FORMAT.test(value.trim()),
+  },
+];
+
 export default function CreateManagerScreen() {
   const router = useRouter();
+  const { checkingAuth, authorized } = useRequireRole(
+    ["manager", "admin"],
+    "/admin/login",
+  );
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+
+  const emailRuleResults = EMAIL_RULES.map((rule) => ({
+    ...rule,
+    met: rule.test(email),
+  }));
+  const isEmailValid = emailRuleResults.every((rule) => rule.met);
+
+  const nameRuleResults = NAME_RULES.map((rule) => ({
+    ...rule,
+    met: rule.test(displayName),
+  }));
+  const isNameValid = nameRuleResults.every((rule) => rule.met);
 
   const buildFunctionUrl = (fnName: string) => {
     try {
@@ -36,6 +77,16 @@ export default function CreateManagerScreen() {
 
     if (!normalizedEmail || !trimmedName) {
       setMessage("Enter manager email and display name.");
+      return;
+    }
+
+    if (!EMAIL_FORMAT.test(normalizedEmail)) {
+      setMessage("Enter a valid email address.");
+      return;
+    }
+
+    if (!isNameValid) {
+      setMessage("Display name does not meet all requirements.");
       return;
     }
 
@@ -118,6 +169,16 @@ export default function CreateManagerScreen() {
     }
   };
 
+  if (checkingAuth || !authorized) {
+    return (
+      <Modal visible transparent animationType="fade">
+        <View style={styles.overlay}>
+          <ActivityIndicator color="#D1DCF3" />
+        </View>
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       visible
@@ -140,6 +201,22 @@ export default function CreateManagerScreen() {
             placeholder="Display Name"
             placeholderTextColor="#7E8EA8"
           />
+          {displayName.length > 0 ? (
+            <View style={styles.ruleList}>
+              {nameRuleResults.map((rule) => (
+                <View key={rule.key} style={styles.ruleRow}>
+                  <Ionicons
+                    name={rule.met ? "checkmark-circle" : "close-circle"}
+                    size={16}
+                    color={rule.met ? "#7FE0A8" : "#FF9B9B"}
+                  />
+                  <Text style={[styles.ruleText, rule.met && styles.ruleTextMet]}>
+                    {rule.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
 
           <TextInput
             style={styles.input}
@@ -150,15 +227,31 @@ export default function CreateManagerScreen() {
             autoCapitalize="none"
             keyboardType="email-address"
           />
+          {email.length > 0 ? (
+            <View style={styles.ruleList}>
+              {emailRuleResults.map((rule) => (
+                <View key={rule.key} style={styles.ruleRow}>
+                  <Ionicons
+                    name={rule.met ? "checkmark-circle" : "close-circle"}
+                    size={16}
+                    color={rule.met ? "#7FE0A8" : "#FF9B9B"}
+                  />
+                  <Text style={[styles.ruleText, rule.met && styles.ruleTextMet]}>
+                    {rule.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
 
           <Pressable
             style={[
               styles.button,
-              (saving || !email.trim() || !displayName.trim()) &&
+              (saving || !isEmailValid || !isNameValid) &&
                 styles.buttonDisabled,
             ]}
             onPress={onCreate}
-            disabled={saving || !email.trim() || !displayName.trim()}
+            disabled={saving || !isEmailValid || !isNameValid}
           >
             {saving ? (
               <ActivityIndicator color="#FFF" />
@@ -206,6 +299,24 @@ const styles = StyleSheet.create({
     color: "#F4F8FF",
     marginBottom: 8,
     backgroundColor: "rgba(255,255,255,0.04)",
+  },
+  ruleList: {
+    marginTop: -4,
+    marginBottom: 8,
+    paddingHorizontal: 4,
+  },
+  ruleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  ruleText: {
+    color: "#D1DCF3",
+    marginLeft: 6,
+    fontSize: 13,
+  },
+  ruleTextMet: {
+    color: "#7FE0A8",
   },
   button: {
     backgroundColor: "rgba(132, 158, 255, 0.2)",
