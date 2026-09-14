@@ -285,6 +285,13 @@ export default function AdminDashboard() {
               }
             }
 
+            void logActivity({
+              action: "account.deleted",
+              targetType: isManagerAccount ? "manager_users" : "sa_users",
+              targetId: email,
+              details: { role: isManagerAccount ? "manager" : "sa" },
+            });
+
             showAlert(
               "Success",
               isManagerAccount
@@ -1189,7 +1196,7 @@ export default function AdminDashboard() {
           <>
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Activity Log</Text>
-              <ActivityLogPanel />
+              <ActivityLogPanel canManage={!checkingAuth && isManagerSession} />
             </View>
 
             <Pressable

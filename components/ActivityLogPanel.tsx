@@ -1,4 +1,8 @@
+import DateField from "@/components/DateField";
+import { showAlert } from "@/lib/alert";
+import { exportRowsToPdf } from "@/lib/exportPdf";
 import { supabase } from "@/lib/supabase";
+import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -68,29 +72,58 @@ const PAGE_SIZE = 50;
 type Props = {
   /** Shows the role filter chips and "Load More" pagination. */
   showFilters?: boolean;
+  /** Shows the date filter, PDF export, and clear-log controls (manager only). */
+  canManage?: boolean;
 };
 
-export default function ActivityLogPanel({ showFilters = true }: Props) {
+// Applies the role chip + date range filters shared by the live list, the
+// PDF export, and the clear-log delete — keeping all three in sync so
+// "export"/"clear" always act on exactly what's on screen.
+function applyFilters(
+  query: any,
+  roleFilter: RoleFilter,
+  fromDate: string,
+  toDate: string,
+) {
+  // Always true for real rows (id is a not-null primary key) — PostgREST
+  // rejects a DELETE with zero filters as a safety guard, so a "clear
+  // everything" request (no role/date filter set) still needs one.
+  let q = query.not("id", "is", null);
+  if (roleFilter !== "all") q = q.eq("actor_role", roleFilter);
+  if (fromDate) q = q.gte("created_at", `${fromDate}T00:00:00.000Z`);
+  if (toDate) q = q.lte("created_at", `${toDate}T23:59:59.999Z`);
+  return q;
+}
+
+export default function ActivityLogPanel({
+  showFilters = true,
+  canManage = false,
+}: Props) {
   const [logs, setLogs] = useState<ActivityLogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("all");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
-  const load = async (filter: RoleFilter) => {
+  const load = async (filter: RoleFilter, from: string, to: string) => {
     setLoading(true);
     setMessage(null);
 
-    let query = supabase
-      .from("activity_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(PAGE_SIZE);
-
-    if (filter !== "all") {
-      query = query.eq("actor_role", filter);
-    }
+    const query = applyFilters(
+      supabase
+        .from("activity_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(PAGE_SIZE),
+      filter,
+      from,
+      to,
+    );
 
     const { data, error } = await query;
 
@@ -106,16 +139,17 @@ export default function ActivityLogPanel({ showFilters = true }: Props) {
     setLoadingMore(true);
     const oldest = logs[logs.length - 1].created_at;
 
-    let query = supabase
-      .from("activity_logs")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .lt("created_at", oldest)
-      .limit(PAGE_SIZE);
-
-    if (roleFilter !== "all") {
-      query = query.eq("actor_role", roleFilter);
-    }
+    const query = applyFilters(
+      supabase
+        .from("activity_logs")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .lt("created_at", oldest)
+        .limit(PAGE_SIZE),
+      roleFilter,
+      fromDate,
+      toDate,
+    );
 
     const { data, error } = await query;
 
@@ -129,9 +163,101 @@ export default function ActivityLogPanel({ showFilters = true }: Props) {
   };
 
   useEffect(() => {
-    void load(roleFilter);
+    void load(roleFilter, fromDate, toDate);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roleFilter]);
+  }, [roleFilter, fromDate, toDate]);
+
+  // Fetches every row matching the current filters (not just the loaded
+  // page) so export/clear act on the full filtered set, not what happens to
+  // be on screen.
+  const fetchAllFiltered = async (): Promise<ActivityLogRow[] | null> => {
+    const query = applyFilters(
+      supabase
+        .from("activity_logs")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      roleFilter,
+      fromDate,
+      toDate,
+    );
+    const { data, error } = await query;
+    if (error) {
+      setMessage(error.message);
+      return null;
+    }
+    return (data as ActivityLogRow[]) || [];
+  };
+
+  const handleDownloadPdf = async () => {
+    setDownloading(true);
+    setMessage(null);
+    try {
+      const rows = await fetchAllFiltered();
+      if (!rows) return;
+      if (rows.length === 0) {
+        setMessage("No activity to export for this filter.");
+        return;
+      }
+
+      await exportRowsToPdf(
+        "Activity Log",
+        ["Timestamp", "Role", "Actor", "Action", "Target", "Details"],
+        rows.map((log) => [
+          formatTimestamp(log.created_at),
+          ROLE_LABEL[log.actor_role],
+          log.actor_name || "-",
+          formatAction(log.action),
+          [log.target_type, log.target_id].filter(Boolean).join(" · ") || "-",
+          formatDetails(log.details) || "-",
+        ]),
+        `activity-log-${new Date().toISOString().slice(0, 10)}.pdf`,
+      );
+    } catch (err: any) {
+      setMessage(err?.message || "Failed to export activity log.");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const handleClearLog = () => {
+    const rangeText =
+      fromDate || toDate
+        ? ` from ${fromDate || "the beginning"} to ${toDate || "now"}`
+        : " (no date filter applied — this clears the entire log)";
+    const roleText = roleFilter !== "all" ? ` for ${ROLE_LABEL[roleFilter]}` : "";
+
+    showAlert(
+      "Clear activity log",
+      `This will permanently delete all logged activity${roleText}${rangeText}. This cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Clear",
+          style: "destructive",
+          onPress: async () => {
+            setClearing(true);
+            setMessage(null);
+            try {
+              const query = applyFilters(
+                supabase.from("activity_logs").delete(),
+                roleFilter,
+                fromDate,
+                toDate,
+              );
+              const { error } = await query;
+              if (error) {
+                setMessage(error.message);
+              } else {
+                await load(roleFilter, fromDate, toDate);
+              }
+            } finally {
+              setClearing(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   // Live-append new log rows as they're written, instead of requiring a
   // manual refresh. Supabase caches channels by name; a unique suffix per
@@ -146,6 +272,7 @@ export default function ActivityLogPanel({ showFilters = true }: Props) {
         (payload) => {
           const row = payload.new as ActivityLogRow;
           if (roleFilter !== "all" && row.actor_role !== roleFilter) return;
+          if (toDate && row.created_at > `${toDate}T23:59:59.999Z`) return;
           setLogs((prev) =>
             prev.some((log) => log.id === row.id) ? prev : [row, ...prev],
           );
@@ -156,7 +283,7 @@ export default function ActivityLogPanel({ showFilters = true }: Props) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [roleFilter]);
+  }, [roleFilter, toDate]);
 
   return (
     <>
@@ -181,6 +308,75 @@ export default function ActivityLogPanel({ showFilters = true }: Props) {
               </Text>
             </Pressable>
           ))}
+        </View>
+      ) : null}
+
+      {canManage ? (
+        <View style={styles.manageBlock}>
+          <View style={styles.dateFilterRow}>
+            <View style={styles.dateFilterField}>
+              <Text style={styles.historyFilterLabel}>From</Text>
+              <DateField value={fromDate} onChange={setFromDate} placeholder="Any" />
+            </View>
+            <View style={styles.dateFilterField}>
+              <Text style={styles.historyFilterLabel}>To</Text>
+              <DateField value={toDate} onChange={setToDate} placeholder="Any" />
+            </View>
+            {fromDate || toDate ? (
+              <View style={styles.dateFilterField}>
+                <Text style={[styles.historyFilterLabel, styles.historyFilterLabelHidden]}>
+                  Clear Filter
+                </Text>
+                <Pressable
+                  style={styles.filterClearButton}
+                  onPress={() => {
+                    setFromDate("");
+                    setToDate("");
+                  }}
+                >
+                  <Text style={styles.filterClearButtonText}>Clear Filter</Text>
+                </Pressable>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.manageButtonRow}>
+            <Pressable
+              style={[
+                styles.manageButton,
+                (downloading || logs.length === 0) && styles.manageButtonDisabled,
+              ]}
+              onPress={handleDownloadPdf}
+              disabled={downloading || logs.length === 0}
+            >
+              {downloading ? (
+                <ActivityIndicator color="#F8FBFF" />
+              ) : (
+                <>
+                  <Ionicons name="download-outline" size={16} color="#F8FBFF" />
+                  <Text style={styles.manageButtonText}>Download PDF</Text>
+                </>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.clearButton,
+                (clearing || logs.length === 0) && styles.manageButtonDisabled,
+              ]}
+              onPress={handleClearLog}
+              disabled={clearing || logs.length === 0}
+            >
+              {clearing ? (
+                <ActivityIndicator color="#FFB3A0" />
+              ) : (
+                <>
+                  <Ionicons name="trash-outline" size={16} color="#FFB3A0" />
+                  <Text style={styles.clearButtonText}>Clear Log</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
         </View>
       ) : null}
 
@@ -279,6 +475,59 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   filterChipTextSelected: { color: "#F8FBFF" },
+  manageBlock: { marginBottom: 8 },
+  dateFilterRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 10,
+    marginBottom: 8,
+  },
+  dateFilterField: { minWidth: 130 },
+  historyFilterLabel: {
+    color: "#9FB0CD",
+    fontSize: 12,
+    fontWeight: "600",
+    marginBottom: 4,
+    textAlign: "center",
+  },
+  historyFilterLabelHidden: { opacity: 0 },
+  filterClearButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+  },
+  filterClearButtonText: { color: "#C4D2FF", fontWeight: "600", fontSize: 13 },
+  manageButtonRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  manageButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(132, 158, 255, 0.2)",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  manageButtonText: { color: "#F8FBFF", fontWeight: "700", fontSize: 13 },
+  clearButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "rgba(255, 107, 107, 0.16)",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  clearButtonText: { color: "#FFB3A0", fontWeight: "700", fontSize: 13 },
+  manageButtonDisabled: { opacity: 0.5 },
   message: { color: "#FFD0A8", marginTop: 8 },
   row: { color: "#D1DCF3", paddingVertical: 10 },
   listWrapper: {

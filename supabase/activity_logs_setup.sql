@@ -33,7 +33,26 @@ create policy "manager_select_activity_logs"
 on public.activity_logs for select
 using (public.is_manager());
 
+-- Lets managers clear the log (optionally scoped to a date range) from the
+-- dashboard.
+drop policy if exists "manager_delete_activity_logs" on public.activity_logs;
+create policy "manager_delete_activity_logs"
+on public.activity_logs for delete
+using (public.is_manager());
+
 -- Without this, postgres_changes subscribers never receive INSERT events
 -- (the "manager_select_activity_logs" RLS policy still gates who actually
--- gets each row broadcast).
-alter publication supabase_realtime add table public.activity_logs;
+-- gets each row broadcast). Guarded because, unlike the table/policies
+-- above, "alter publication ... add table" has no "if not exists" form and
+-- errors on a second run once the table's already a member.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'activity_logs'
+  ) then
+    alter publication supabase_realtime add table public.activity_logs;
+  end if;
+end $$;
