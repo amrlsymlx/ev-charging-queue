@@ -13,6 +13,7 @@ import { getRemainingSeconds } from "@/lib/eta";
 import { supabase } from "@/lib/supabase";
 import {
     ChargingBay,
+    ChargingBayOrientation,
     ChargingSession,
     NewQueueEntryInput,
     NewStaffQueueEntryInput,
@@ -63,6 +64,10 @@ interface QueueContextValue {
     enabled: boolean,
     reason?: string,
   ) => Promise<void>;
+  setBayOrientation: (
+    bayId: string,
+    orientation: ChargingBayOrientation,
+  ) => Promise<void>;
 }
 
 const QueueContext = createContext<QueueContextValue | null>(null);
@@ -86,6 +91,7 @@ function mapBay(row: any): ChargingBay {
     status: row.status,
     enabled: row.enabled ?? true,
     disabledReason: row.disabled_reason ?? undefined,
+    orientation: row.orientation === "right" ? "right" : "left",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -872,6 +878,25 @@ export function QueueProvider({ children }: PropsWithChildren) {
     });
   };
 
+  const setBayOrientation = async (
+    bayId: string,
+    orientation: ChargingBayOrientation,
+  ) => {
+    const { error } = await supabase
+      .from("bays")
+      .update({ orientation, updated_at: new Date().toISOString() })
+      .eq("id", bayId);
+
+    if (error) throw new Error(error.message || "Failed to update bay orientation.");
+    await loadBays();
+    void logActivity({
+      action: "bay.orientation",
+      targetType: "bay",
+      targetId: bayId,
+      details: { orientation },
+    });
+  };
+
   const setRainMode = async (
     enabled: boolean,
     actor: { actorRole: "sa" | "manager"; actorName?: string },
@@ -958,6 +983,7 @@ export function QueueProvider({ children }: PropsWithChildren) {
     renameBay,
     deleteBay,
     setBayEnabled,
+    setBayOrientation,
   };
 
   return (

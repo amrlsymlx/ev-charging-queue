@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -17,20 +17,11 @@ import { Ionicons } from "@expo/vector-icons";
 
 export default function SADashboardScreen() {
   const router = useRouter();
-  const { saName: routeSaName } = useLocalSearchParams<{
-    saName?: string;
-    role?: string;
-  }>();
   const [tab, setTab] = useState<"queue" | "board">("queue");
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [authorized, setAuthorized] = useState(false);
-  const [saName, setSaName] = useState(routeSaName || "SA");
+  const [saName, setSaName] = useState("SA");
 
-  // The saName/role route params are only ever used for the initial greeting
-  // text — they're not trusted for access control. supabase.auth.getUser()
-  // round-trips to Supabase Auth to confirm a real signed-in session with an
-  // sa/manager/admin role exists before this screen does anything, since a
-  // route param can be set by simply navigating to this URL directly.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -47,7 +38,7 @@ export default function SADashboardScreen() {
       }
 
       setSaName(
-        routeSaName || user?.user_metadata?.name || user?.email?.split("@")[0] || "SA",
+        user?.user_metadata?.name || user?.email?.split("@")[0] || "SA",
       );
       setAuthorized(true);
       setCheckingAuth(false);

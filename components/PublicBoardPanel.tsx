@@ -229,10 +229,9 @@ export default function PublicBoardPanel({
 
               <ChargerCarVisual
                 active={isActive}
-                colorAccent={
-                  phaseInfo?.phase === "charging" ? "#3CE685" : "#FFD0A8"
-                }
+                phase={phaseInfo?.phase ?? null}
                 disabled={!bay.enabled}
+                orientation={bay.orientation}
                 raining={rainMode}
               />
 
