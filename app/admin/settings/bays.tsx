@@ -26,7 +26,8 @@ export default function BaysScreen() {
     ["manager", "admin"],
     "/admin/login",
   );
-  const { bays, addBay, renameBay, deleteBay, setBayEnabled } = useQueue();
+  const { bays, addBay, renameBay, deleteBay, setBayEnabled, setBayOrientation } =
+    useQueue();
 
   const [bayName, setBayName] = useState("");
   const [adding, setAdding] = useState(false);
@@ -42,6 +43,7 @@ export default function BaysScreen() {
   );
   const [customReason, setCustomReason] = useState("");
   const [updatingBayId, setUpdatingBayId] = useState<string | null>(null);
+  const [orientingBayId, setOrientingBayId] = useState<string | null>(null);
 
   const onAddBay = async () => {
     if (!bayName.trim()) {
@@ -98,6 +100,25 @@ export default function BaysScreen() {
       showAlert("Failed to enable bay", err?.message || "Unknown error");
     } finally {
       setUpdatingBayId(null);
+    }
+  };
+
+  const onSetOrientation = async (
+    bay: ChargingBay,
+    orientation: "left" | "right",
+  ) => {
+    if (bay.orientation === orientation) return;
+
+    setOrientingBayId(bay.id);
+    try {
+      await setBayOrientation(bay.id, orientation);
+    } catch (err: any) {
+      showAlert(
+        "Failed to update orientation",
+        err?.message || "Unknown error",
+      );
+    } finally {
+      setOrientingBayId(null);
     }
   };
 
@@ -242,6 +263,41 @@ export default function BaysScreen() {
                         ? `DISABLED — ${bay.disabledReason || "Unspecified"}`
                         : bay.status.toUpperCase()}
                     </Text>
+
+                    <View style={styles.orientationRow}>
+                      <Text style={styles.orientationLabel}>Charger side</Text>
+                      {orientingBayId === bay.id ? (
+                        <ActivityIndicator
+                          color="#D1DCF3"
+                          style={{ marginLeft: 8 }}
+                        />
+                      ) : (
+                        <View style={styles.orientationToggle}>
+                          {(["left", "right"] as const).map((side) => (
+                            <Pressable
+                              key={side}
+                              style={[
+                                styles.orientationOption,
+                                bay.orientation === side &&
+                                  styles.orientationOptionSelected,
+                              ]}
+                              onPress={() => onSetOrientation(bay, side)}
+                              accessibilityLabel={`Set ${bay.name} charger side to ${side}`}
+                            >
+                              <Text
+                                style={[
+                                  styles.orientationOptionText,
+                                  bay.orientation === side &&
+                                    styles.orientationOptionTextSelected,
+                                ]}
+                              >
+                                {side === "left" ? "Left" : "Right"}
+                              </Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+                    </View>
                   </View>
 
                   <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -433,6 +489,38 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     marginTop: 2,
     fontSize: 12,
+  },
+  orientationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+  },
+  orientationLabel: {
+    color: "#7E8EA8",
+    fontSize: 12,
+    marginRight: 8,
+  },
+  orientationToggle: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 8,
+    padding: 2,
+  },
+  orientationOption: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+  },
+  orientationOptionSelected: {
+    backgroundColor: "rgba(132, 158, 255, 0.3)",
+  },
+  orientationOptionText: {
+    color: "#9FB0CD",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  orientationOptionTextSelected: {
+    color: "#F4F8FF",
   },
   modalOverlay: {
     flex: 1,

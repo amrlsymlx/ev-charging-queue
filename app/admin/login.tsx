@@ -87,10 +87,7 @@ export default function AdminLoginScreen() {
     } catch (e) {
       // ignore storage errors
     }
-    router.replace({
-      pathname: "/admin/dashboard",
-      params: { adminEmail: data.user.email ?? normalizedEmail },
-    });
+    router.replace("/admin/dashboard");
   };
 
   const onOpenForgotPassword = () => {
