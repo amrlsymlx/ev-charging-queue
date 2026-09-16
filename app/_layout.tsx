@@ -2,6 +2,7 @@ import Head from "expo-router/head";
 import { Stack, usePathname, useRouter } from "expo-router";
 import { useEffect } from "react";
 
+import AppAnalytics from "@/components/Analytics";
 import { QueueProvider, useQueue } from "@/context/QueueContext";
 import { getSecureItem, setSecureItem } from "@/lib/secureStorage";
 import { supabase } from "@/lib/supabase";
@@ -69,6 +70,7 @@ export default function RootLayout() {
     <QueueProvider>
       <DocumentTitle />
       <CustomerDeviceGate />
+      <AppAnalytics />
       <Stack
         screenOptions={{
           headerShown: false,
