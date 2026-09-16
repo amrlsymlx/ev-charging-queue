@@ -90,7 +90,6 @@ export default function SALoginScreen() {
       return;
     }
 
-    const saName = saAccount.name || "SA";
     // persist credentials if requested
     try {
       const KEY = "sa_credentials";
@@ -109,10 +108,7 @@ export default function SALoginScreen() {
     setPassword("");
     setLoading(false);
 
-    router.replace({
-      pathname: "/sa/dashboard",
-      params: { saName, role: userRole },
-    });
+    router.replace("/sa/dashboard");
   };
 
   useEffect(() => {

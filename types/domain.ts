@@ -7,6 +7,8 @@ export type QueueEntryStatus =
 
 export type ChargingBayStatus = "available" | "occupied";
 
+export type ChargingBayOrientation = "left" | "right";
+
 export type ChargingSessionStatus = "active" | "completed" | "cancelled";
 
 export type UserRole = "sa" | "admin";
@@ -19,6 +21,7 @@ export interface ChargingBay {
   status: ChargingBayStatus;
   enabled: boolean;
   disabledReason?: string;
+  orientation: ChargingBayOrientation;
   createdAt: string;
   updatedAt: string;
 }
