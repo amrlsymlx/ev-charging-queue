@@ -26,14 +26,18 @@ Your training data is out of date. Before writing any Expo, Expo Router or React
 - `supabase/` – SQL setup and migration scripts
 - `skill/` – product and design docs (PRD, schema, ETA calculation, system flow, roadmap). Read the relevant one before changing that area.
 
-## Rules
+## Code style and conventions
 
 1. **Cross-platform first.** Every change must work on iOS, Android and web. Check `Platform.OS` before using native-only APIs (haptics, secure store, maps) and provide a web fallback.
 2. **TypeScript strict.** No `any` unless unavoidable; type Supabase rows and component props.
-3. **Match existing code.** Follow the naming, styling and file structure already in the repo. Reuse components in `components/` and helpers in `lib/` before writing new ones.
-4. **Check dependencies before adding.** Use `npx expo install <pkg>` so versions match the SDK. Don't add a library for something the current stack already does.
-5. **Keep changes small.** Do only what was asked. No drive-by refactors or reformatting of unrelated code.
+3. **Reuse before adding.** Look in `components/` and `lib/` first; shared domain types live in `types/domain.ts`. Platform variants use `.native.tsx` / `.web.tsx` suffixes (e.g. `Analytics.web.tsx`, `showroom.native.tsx`).
+4. **Install packages with `npx expo install <pkg>`** so versions match the SDK. Don't add a library for something the current stack already does.
+5. **Touch only the files the request needs.** No reformatting or refactors of unrelated code.
 6. **Docs may be stale, so verify against the code and the SQL in `supabase/`.** The `skill/` docs describe intent, but some are out of date (for example the user tables and roles differ between docs). Treat the code and `supabase/` SQL as the source of truth.
+
+## Testing
+
+No test suite exists. After changes: run `npm run lint` and fix what you introduced, then check the affected flow with `npm run web`. For anything using GPS, maps, haptics or secure storage, also check the web fallback path. If you couldn't run the app, say so.
 
 ## Supabase and security
 
@@ -57,7 +61,8 @@ Your training data is out of date. Before writing any Expo, Expo Router or React
 - **Env**: `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, `EXPO_PUBLIC_SITE_URL` (must exactly match a Supabase Auth redirect allow-list entry). `.env`, `.env.development`, `.env.production` exist locally; never print or commit them.
 - **Deploy**: static web export (`npx expo export -p web` → `dist/`) on Vercel via `vercel.json`.
 
-## Git
+## Commits and PRs
 
 - Don't commit or push unless asked.
-- Write short, imperative commit messages.
+- Commit subjects are imperative and under 72 characters. Run `npm run lint` before committing.
+- Never commit `.env*` files or the service-role key.
