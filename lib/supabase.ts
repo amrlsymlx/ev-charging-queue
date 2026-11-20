@@ -38,7 +38,7 @@ export const SITE_URL =
   extras?.EXPO_PUBLIC_SITE_URL ||
   process.env.SITE_URL ||
   process.env.EXPO_PUBLIC_SITE_URL ||
-  "https://kpachargemanage.netlify.app";
+  "https://kpachargermanage.vercel.app";
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   // eslint-disable-next-line no-console
