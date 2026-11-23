@@ -159,6 +159,49 @@ export function getOperatingDayRange(
   return { start, end };
 }
 
+// Earliest moment at or after `from` when queue registration is open (same
+// rule as evaluateSchedule's canRegister: from open_time up to, but not
+// including, last_registration_time; closed days and holidays borrowing
+// Sunday's schedule are skipped). Used to turn a raw "eligible again at"
+// timestamp, which can fall at 3am or on a closed day, into a time the
+// customer can actually act on. Returns `from` unchanged when no schedule is
+// usable.
+export function nextRegistrationOpening(
+  from: Date,
+  hoursRows: OperatingHoursRow[],
+  holidays: PublicHoliday[],
+): { when: Date; schedule: OperatingHoursRow | null } {
+  for (let offset = 0; offset < 15; offset++) {
+    const day = new Date(from);
+    day.setDate(day.getDate() + offset);
+
+    const isHoliday = holidays.some((h) => h.holiday_date === toDateKey(day));
+    const effectiveDay = isHoliday ? 0 : day.getDay();
+    const schedule = hoursRows.find((r) => r.day_of_week === effectiveDay);
+    if (!schedule || schedule.is_closed) continue;
+
+    const openMinutes = parseTimeToMinutes(schedule.open_time) ?? 0;
+    const lastRegMinutes =
+      parseTimeToMinutes(schedule.last_registration_time) ??
+      parseTimeToMinutes(schedule.close_time) ??
+      1440;
+
+    const open = new Date(day);
+    open.setHours(0, openMinutes, 0, 0);
+    const cutoff = new Date(day);
+    cutoff.setHours(0, lastRegMinutes, 0, 0);
+
+    if (offset === 0 && from >= open && from < cutoff) {
+      return { when: from, schedule };
+    }
+    // Later today than the cutoff means try the next day; earlier than
+    // opening (or any later day) means that day's opening time.
+    if (offset === 0 && from >= cutoff) continue;
+    return { when: open, schedule };
+  }
+  return { when: from, schedule: null };
+}
+
 export async function fetchOperatingHours(): Promise<OperatingHoursRow[]> {
   const { data, error } = await supabase
     .from("operating_hours")

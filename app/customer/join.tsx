@@ -27,6 +27,7 @@ import {
     fetchOperatingHours,
     fetchUpcomingHolidays,
     getOperatingDayRange,
+    nextRegistrationOpening,
     OperatingHoursRow,
     PublicHoliday,
 } from "../../lib/operatingHours";
@@ -296,19 +297,27 @@ export default function CustomerJoinScreen() {
   }, []);
 
   const showWeeklyLimitAlert = (availableAt: string | null) => {
-    const when = availableAt
-      ? new Date(availableAt).toLocaleString(undefined, {
-          weekday: "short",
-          day: "numeric",
-          month: "short",
-          hour: "numeric",
-          minute: "2-digit",
-        })
-      : null;
+    let when: string | null = null;
+    if (availableAt) {
+      // Push the eligible-again time into registration hours so the customer
+      // isn't told to come back at e.g. 3am or on a closed day.
+      const { when: opening } = nextRegistrationOpening(
+        new Date(availableAt),
+        hoursRows,
+        holidays,
+      );
+      when = opening.toLocaleString(undefined, {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+    }
     showAlert(
       "Weekly charging limit reached",
       `This plate number has already used its charge for the past 7 days.${
-        when ? ` You can join the queue again after ${when}.` : ""
+        when ? ` You can join the queue again from ${when}.` : ""
       }`,
     );
   };
