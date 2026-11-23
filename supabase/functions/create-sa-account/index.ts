@@ -12,7 +12,7 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 // Only the deployed app and local dev servers may read these responses.
 // Mobile clients don't send an Origin header and aren't subject to CORS at
 // all, so this only affects browser callers.
-const PRODUCTION_ORIGIN = "https://kpachargemanage.netlify.app";
+const PRODUCTION_ORIGIN = "https://kpachargermanage.vercel.app";
 
 function isAllowedOrigin(origin: string | null): boolean {
   if (!origin) return false;
