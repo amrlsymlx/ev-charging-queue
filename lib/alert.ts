@@ -6,6 +6,25 @@ type AlertButton = {
   style?: "default" | "cancel" | "destructive";
 };
 
+export type WebAlertRequest = {
+  title: string;
+  message?: string;
+  buttons?: AlertButton[];
+};
+
+// On web, window.alert/confirm always label the dialog "<site> says" and the
+// browser controls that header, so alerts are rendered by an in-app dialog
+// (components/WebAlertHost.tsx) that can say "<showroom name> says" instead.
+// The host registers itself here; until it mounts we fall back to the
+// browser dialogs below.
+let webAlertHandler: ((request: WebAlertRequest) => void) | null = null;
+
+export function setWebAlertHandler(
+  handler: ((request: WebAlertRequest) => void) | null,
+) {
+  webAlertHandler = handler;
+}
+
 // RN's Alert.alert only implements ios/android and silently no-ops on web.
 export function showAlert(
   title: string,
@@ -14,6 +33,11 @@ export function showAlert(
 ) {
   if (Platform.OS !== "web") {
     Alert.alert(title, message, buttons);
+    return;
+  }
+
+  if (webAlertHandler) {
+    webAlertHandler({ title, message, buttons });
     return;
   }
 
