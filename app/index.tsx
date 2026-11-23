@@ -49,18 +49,6 @@ export default function Index() {
         <Text style={styles.title}>EV Charger Queue Management</Text>
 
         <View style={styles.buttonRow}>
-          <Link href="/customer" asChild>
-            <Pressable style={styles.primaryActionButtonRow}>
-              <Text style={styles.primaryButtonText}>Customer QR Landing</Text>
-            </Pressable>
-          </Link>
-
-          <Link href="/public/board" asChild>
-            <Pressable style={styles.boardActionButtonRow}>
-              <Text style={styles.boardButtonText}>Live Queue Board</Text>
-            </Pressable>
-          </Link>
-
           <Link href="/sa/login" asChild>
             <Pressable style={styles.secondaryActionButtonRow}>
               <Text style={styles.secondaryButtonText}>SA Login</Text>
@@ -198,17 +186,6 @@ const styles = StyleSheet.create({
     alignItems: "stretch",
     gap: 8,
   },
-  primaryActionButtonRow: {
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
-    borderWidth: 0,
-    borderColor: "transparent",
-    flex: 1,
-  },
   secondaryActionButtonRow: {
     borderRadius: 14,
     paddingVertical: 14,
@@ -230,23 +207,6 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     borderColor: "transparent",
     flex: 1,
-  },
-  boardActionButtonRow: {
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(242, 196, 76, 0.18)",
-    borderWidth: 0,
-    borderColor: "transparent",
-    flex: 1,
-  },
-  boardButtonText: {
-    color: "#FFF6E0",
-    fontWeight: "700",
-    fontSize: 15,
-    textAlign: "center",
   },
   linkRow: {
     flexDirection: "row",
