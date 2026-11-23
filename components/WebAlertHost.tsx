@@ -1,16 +1,14 @@
 import { useEffect, useState } from "react";
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 
-import { useQueue } from "@/context/QueueContext";
 import { setWebAlertHandler, type WebAlertRequest } from "@/lib/alert";
 
 type AlertButton = NonNullable<WebAlertRequest["buttons"]>[number];
 
-// Web-only replacement for window.alert/confirm so the dialog header reads
-// "<showroom name> says" instead of the browser's "<site> says". Renders
-// nothing on iOS/Android, where Alert.alert is used directly.
+// Web-only replacement for window.alert/confirm, styled like the app's other
+// modals instead of the browser's "<site> says" dialog. Renders nothing on
+// iOS/Android, where Alert.alert is used directly.
 export default function WebAlertHost() {
-  const { showroomName } = useQueue();
   const [queue, setQueue] = useState<WebAlertRequest[]>([]);
 
   useEffect(() => {
@@ -46,7 +44,6 @@ export default function WebAlertHost() {
     <Modal transparent animationType="fade" visible onRequestClose={dismiss}>
       <Pressable style={styles.overlay} onPress={dismiss}>
         <Pressable style={styles.dialog} onPress={() => {}}>
-          <Text style={styles.says}>{showroomName} says</Text>
           <Text style={styles.title}>{current.title}</Text>
           {current.message ? (
             <Text style={styles.message}>{current.message}</Text>
@@ -62,7 +59,14 @@ export default function WebAlertHost() {
                 ]}
                 onPress={() => press(button)}
               >
-                <Text style={styles.buttonText}>{button.text ?? "OK"}</Text>
+                <Text
+                  style={[
+                    styles.buttonText,
+                    button.style === "cancel" && styles.buttonTextCancel,
+                  ]}
+                >
+                  {button.text ?? "OK"}
+                </Text>
               </Pressable>
             ))}
           </View>
@@ -75,58 +79,56 @@ export default function WebAlertHost() {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: "rgba(3, 7, 18, 0.7)",
+    backgroundColor: "rgba(0,0,0,0.5)",
     alignItems: "center",
     justifyContent: "center",
-    padding: 16,
   },
   dialog: {
-    width: "100%",
-    maxWidth: 420,
-    backgroundColor: "#10213B",
-    borderRadius: 16,
+    width: "86%",
+    maxWidth: 480,
+    backgroundColor: "rgba(12,16,26,0.98)",
+    borderRadius: 12,
     padding: 18,
     gap: 8,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
-  },
-  says: {
-    color: "#9FB0CD",
-    fontSize: 12,
-    fontWeight: "600",
   },
   title: {
     color: "#F6FAFF",
-    fontSize: 17,
-    fontWeight: "800",
+    fontWeight: "700",
+    fontSize: 16,
+    textAlign: "center",
   },
   message: {
     color: "#D1DCF4",
     fontSize: 14,
     lineHeight: 20,
+    textAlign: "center",
   },
   buttonRow: {
     flexDirection: "row",
-    justifyContent: "flex-end",
+    justifyContent: "center",
     flexWrap: "wrap",
     gap: 8,
     marginTop: 10,
   },
   button: {
-    backgroundColor: "#F26419",
+    backgroundColor: "rgba(132, 158, 255, 0.2)",
     borderRadius: 10,
-    paddingVertical: 9,
-    paddingHorizontal: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+    alignItems: "center",
   },
   buttonCancel: {
-    backgroundColor: "rgba(132, 158, 255, 0.2)",
+    backgroundColor: "transparent",
   },
   buttonDestructive: {
-    backgroundColor: "#D64545",
+    backgroundColor: "rgba(214, 69, 69, 0.3)",
   },
   buttonText: {
-    color: "#FFF6F2",
+    color: "#F8FBFF",
     fontWeight: "700",
     fontSize: 14,
+  },
+  buttonTextCancel: {
+    color: "#C4D2FF",
   },
 });
