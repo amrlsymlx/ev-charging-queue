@@ -124,6 +124,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#070D1A",
+    overflow: "hidden",
   },
   centered: {
     justifyContent: "center",
