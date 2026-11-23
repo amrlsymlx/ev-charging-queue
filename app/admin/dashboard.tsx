@@ -19,6 +19,7 @@ import {
     SafeAreaView,
     ScrollView,
     StyleSheet,
+    Switch,
     Text,
     View,
 } from "react-native";
@@ -92,6 +93,7 @@ export default function AdminDashboard() {
   const [modalMessage, setModalMessage] = useState<string | null>(null);
   const [showSaListModal, setShowSaListModal] = useState(false);
   const [showManagerListModal, setShowManagerListModal] = useState(false);
+  const [showChargeLimitModal, setShowChargeLimitModal] = useState(false);
 
   const [historyFromDate, setHistoryFromDate] = useState("");
   const [historyToDate, setHistoryToDate] = useState("");
@@ -118,6 +120,11 @@ export default function AdminDashboard() {
   const [loadingShowroom, setLoadingShowroom] = useState(false);
   const [statsResetAt, setStatsResetAt] = useState<string | null>(null);
   const [resettingStats, setResettingStats] = useState(false);
+  // At most one of these can be on at a time (also enforced by a CHECK
+  // constraint on showroom_settings).
+  const [dailyLimitEnabled, setDailyLimitEnabled] = useState(true);
+  const [weeklyLimitEnabled, setWeeklyLimitEnabled] = useState(false);
+  const [savingPlateLimit, setSavingPlateLimit] = useState(false);
 
   const [blockedPlateCount, setBlockedPlateCount] = useState(0);
   const [loadingBlockedPlateCount, setLoadingBlockedPlateCount] =
@@ -190,8 +197,67 @@ export default function AdminDashboard() {
       setGraceMinutes(String(data.grace_minutes ?? 5));
       setChargingMinutes(String(data.charging_minutes ?? 60));
       setStatsResetAt(data.stats_reset_at ?? null);
+      setDailyLimitEnabled(data.daily_plate_limit_enabled !== false);
+      setWeeklyLimitEnabled(data.weekly_charge_limit_enabled === true);
     }
     setLoadingShowroom(false);
+  };
+
+  // The three plate-limit options (no limit / daily / weekly) behave like a
+  // radio group: exactly one is on. "No limit" isn't stored separately — it
+  // is simply both daily and weekly being off. Turning daily or weekly on
+  // turns the other off in the same update (the database rejects both being
+  // on); turning the active one off falls back to "no limit". "No limit"
+  // itself can't be switched off directly, pick another option instead.
+  const noPlateLimit = !dailyLimitEnabled && !weeklyLimitEnabled;
+
+  const handleTogglePlateLimit = async (
+    which: "none" | "daily" | "weekly",
+    enabled: boolean,
+  ) => {
+    if (checkingAuth || !isManagerSession) {
+      setMessage("Not authorized to change this setting.");
+      return;
+    }
+
+    if (which === "none" && !enabled) return;
+
+    const previous = {
+      daily: dailyLimitEnabled,
+      weekly: weeklyLimitEnabled,
+    };
+    const next =
+      which === "none"
+        ? { daily: false, weekly: false }
+        : which === "daily"
+          ? { daily: enabled, weekly: false }
+          : { daily: false, weekly: enabled };
+
+    setDailyLimitEnabled(next.daily);
+    setWeeklyLimitEnabled(next.weekly);
+    setSavingPlateLimit(true);
+
+    const { error } = await supabase
+      .from("showroom_settings")
+      .update({
+        daily_plate_limit_enabled: next.daily,
+        weekly_charge_limit_enabled: next.weekly,
+      })
+      .eq("id", "main");
+
+    if (error) {
+      setDailyLimitEnabled(previous.daily);
+      setWeeklyLimitEnabled(previous.weekly);
+      setMessage(error.message);
+    } else {
+      void logActivity({
+        action: `showroom_settings.${which}_plate_limit_${enabled ? "on" : "off"}`,
+        targetType: "showroom_settings",
+        targetId: "main",
+        details: next,
+      });
+    }
+    setSavingPlateLimit(false);
   };
 
   const loadBlockedPlateCount = async () => {
@@ -1330,6 +1396,28 @@ export default function AdminDashboard() {
                 </Pressable>
               </View>
 
+              <View style={styles.settingsRow}>
+                <View style={styles.settingsRowLeft}>
+                  <Text style={styles.settingsRowTitle}>Charge Limits</Text>
+                  <Text style={styles.settingsRowSubtitle}>
+                    {loadingShowroom
+                      ? "Loading…"
+                      : dailyLimitEnabled
+                        ? "Daily limit on"
+                        : weeklyLimitEnabled
+                          ? "Weekly limit on"
+                          : "No limit"}
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.settingsRowButton}
+                  onPress={() => setShowChargeLimitModal(true)}
+                  disabled={checkingAuth || !isManagerSession}
+                >
+                  <Text style={styles.settingsRowButtonText}>Manage</Text>
+                </Pressable>
+              </View>
+
               <View style={[styles.settingsRow, styles.settingsRowLast]}>
                 <View style={styles.settingsRowLeft}>
                   <Text style={styles.settingsRowTitle}>
@@ -1618,6 +1706,73 @@ export default function AdminDashboard() {
             <Pressable
               style={[styles.secondaryButton, { marginTop: 8 }]}
               onPress={() => setShowManagerListModal(false)}
+            >
+              <Text style={styles.secondaryButtonText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showChargeLimitModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowChargeLimitModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Charge Limits</Text>
+            <Text style={styles.listHeading}>
+              Only one option can be on at a time.
+            </Text>
+
+            {(
+              [
+                {
+                  key: "none",
+                  title: "No Charge Limit",
+                  subtitle: "Plates can join the queue any number of times.",
+                  value: noPlateLimit,
+                },
+                {
+                  key: "daily",
+                  title: "Daily Charge Limit",
+                  subtitle: "One queue join per plate per day.",
+                  value: dailyLimitEnabled,
+                },
+                {
+                  key: "weekly",
+                  title: "Weekly Charge Limit",
+                  subtitle: "One charge per plate every 7 days.",
+                  value: weeklyLimitEnabled,
+                },
+              ] as const
+            ).map((option) => (
+              <View key={option.key} style={styles.settingsRow}>
+                <View style={styles.settingsRowLeft}>
+                  <Text style={styles.settingsRowTitle}>{option.title}</Text>
+                  <Text style={styles.settingsRowSubtitle}>
+                    {option.subtitle}
+                  </Text>
+                </View>
+                <Switch
+                  value={option.value}
+                  onValueChange={(v) => handleTogglePlateLimit(option.key, v)}
+                  disabled={
+                    checkingAuth ||
+                    !isManagerSession ||
+                    loadingShowroom ||
+                    savingPlateLimit ||
+                    // "No limit" can't be switched off directly; pick another.
+                    (option.key === "none" && option.value)
+                  }
+                />
+              </View>
+            ))}
+
+            <Pressable
+              style={[styles.secondaryButton, { marginTop: 12 }]}
+              onPress={() => setShowChargeLimitModal(false)}
             >
               <Text style={styles.secondaryButtonText}>Close</Text>
             </Pressable>

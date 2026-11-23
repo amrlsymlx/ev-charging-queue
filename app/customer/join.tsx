@@ -295,6 +295,24 @@ export default function CustomerJoinScreen() {
     return () => anim.stop();
   }, []);
 
+  const showWeeklyLimitAlert = (availableAt: string | null) => {
+    const when = availableAt
+      ? new Date(availableAt).toLocaleString(undefined, {
+          weekday: "short",
+          day: "numeric",
+          month: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        })
+      : null;
+    showAlert(
+      "Weekly charging limit reached",
+      `This plate number has already used its charge for the past 7 days.${
+        when ? ` You can join the queue again after ${when}.` : ""
+      }`,
+    );
+  };
+
   const handleSubmit = async () => {
     if (scheduleEval && !scheduleEval.canRegister) {
       setMessage(scheduleEval.message);
@@ -359,6 +377,24 @@ export default function CustomerJoinScreen() {
         "Plate blocked",
         `${blockedPlate}\n\nThis plate number is blocked from using our charger due violation of our T&C.`,
       );
+      return;
+    }
+
+    // Optional manager-controlled rule: one charge per plate per rolling 7
+    // days. The RPC returns null when the rule is off or the plate is
+    // eligible, otherwise when the plate may charge again.
+    const { data: weeklyAvailableAt, error: weeklyCheckError } =
+      await supabase.rpc("plate_weekly_charge_available_at", {
+        p_plate: formattedPlate || formatPlateNumber(plateNumber),
+      });
+
+    if (weeklyCheckError) {
+      setMessage("Unable to verify queue eligibility. Please try again.");
+      return;
+    }
+
+    if (weeklyAvailableAt) {
+      showWeeklyLimitAlert(weeklyAvailableAt as string);
       return;
     }
 
@@ -455,6 +491,8 @@ export default function CustomerJoinScreen() {
           "Already queued today",
           "This plate number has already joined the charging queue today. Please try again tomorrow.",
         );
+      } else if (rawMessage.includes("WEEKLY_CHARGE_LIMIT_REACHED")) {
+        showWeeklyLimitAlert(null);
       } else if (rawMessage.includes("REGISTRATION_CLOSED")) {
         setMessage(
           "Queue registration is currently closed. Please check the showroom's operating hours.",
