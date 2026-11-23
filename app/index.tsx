@@ -94,6 +94,30 @@ export default function Index() {
             </View>
           );
         })}
+
+        <View style={styles.noteBox}>
+          <Text style={styles.noteTitle}>Note</Text>
+          <Text style={styles.noteText}>
+            Do not open these links in the counter browser. Opening a customer
+            page marks the device as a customer device, so every other page
+            (this home page, SA / Manager login, dashboards) will redirect to
+            the customer page from then on. Only the customer and public pages
+            stay reachable.
+          </Text>
+        </View>
+
+        <View style={styles.noteBox}>
+          <Text style={styles.noteTitle}>Clear the redirect</Text>
+          <Text style={styles.noteText}>
+            1. Clear the mark: open the browser&apos;s site settings for this
+            site and clear site data, or in developer tools go to Application
+            → Local Storage and delete the customer_device_marked key. Then
+            reload.
+          </Text>
+          <Text style={styles.noteText}>
+            2. In the mobile app, clear the app&apos;s data or reinstall it.
+          </Text>
+        </View>
       </View>
     </View>
   );
@@ -244,6 +268,24 @@ const styles = StyleSheet.create({
     color: "#F4F8FF",
     fontWeight: "700",
     fontSize: 12,
+  },
+  noteBox: {
+    width: "100%",
+    gap: 4,
+    backgroundColor: "rgba(242, 196, 76, 0.14)",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  noteTitle: {
+    color: "#FFE9A8",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  noteText: {
+    color: "#F4F8FF",
+    fontSize: 12,
+    lineHeight: 17,
   },
   bgCircleOne: {
     position: "absolute",

@@ -18,10 +18,10 @@ function DocumentTitle() {
 
 // Device-level (not true per-IP — this is a static site with no server to
 // inspect request IPs) tracking: once a device has opened a customer-facing
-// route, it can no longer land on the landing page ("/", with its SA/Manager
-// login links) — even by editing the address bar back to it — unless it
-// currently holds a valid staff session. This never blocks any route other
-// than "/" itself.
+// route, every route other than the customer (/customer/*) and public
+// (/public/*) ones — the landing page "/", SA/Manager login, dashboards,
+// settings — redirects back to /customer, even by editing the address bar,
+// unless the device currently holds a valid staff session.
 const CUSTOMER_DEVICE_KEY = "customer_device_marked";
 
 function CustomerDeviceGate() {
@@ -41,8 +41,6 @@ function CustomerDeviceGate() {
         }
         return;
       }
-
-      if (pathname !== "/") return;
 
       let marked = false;
       try {
